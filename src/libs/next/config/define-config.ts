@@ -432,13 +432,14 @@ export function defineConfig(config: CustomNextConfig) {
 
   const withBundleAnalyzer = process.env.ANALYZE === 'true' ? analyzer() : noWrapper;
 
-  const withPWA = isProd
-    ? withSerwistInit({
-        register: false,
-        swDest: 'public/sw.js',
-        swSrc: 'src/app/sw.ts',
-      })
-    : noWrapper;
+  const withPWA =
+    isProd && process.env.DISABLE_PWA !== '1'
+      ? withSerwistInit({
+          register: false,
+          swDest: 'public/sw.js',
+          swSrc: 'src/app/sw.ts',
+        })
+      : noWrapper;
 
   return withBundleAnalyzer(withPWA(nextConfig as NextConfig));
 }
