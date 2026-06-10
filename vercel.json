@@ -1,5 +1,8 @@
 {
   "buildCommand": "bun run build:vercel",
+  "git": {
+    "deploymentEnabled": false
+  },
   "headers": [
     {
       "source": "/_spa/(.*)",
