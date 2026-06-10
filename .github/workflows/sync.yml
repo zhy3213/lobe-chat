@@ -144,7 +144,18 @@ jobs:
         if: steps.sync.outputs.changed == 'true'
         id: deploy
         run: |
-          url="$(npx --yes vercel@${VERCEL_CLI_VERSION} deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN")"
+          url=""
+          for attempt in 1 2 3; do
+            echo "Vercel deploy attempt ${attempt}/3"
+            if url="$(npx --yes vercel@${VERCEL_CLI_VERSION} deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN")"; then
+              break
+            fi
+            status="$?"
+            if [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            sleep "$((attempt * 20))"
+          done
           echo "url=${url}" >> "$GITHUB_OUTPUT"
           echo "### Vercel production deployment" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
