@@ -33,6 +33,7 @@ export {
 } from './errors';
 export * from './helpers';
 export { LobeAkashChatAI } from './providers/akashchat';
+export { LobeAntGroupAI } from './providers/antgroup';
 export { LobeAnthropicAI } from './providers/anthropic';
 export { LobeAzureAI } from './providers/azureai';
 export { LobeAzureOpenAI } from './providers/azureOpenai';
@@ -78,4 +79,10 @@ export { consumeStreamUntilDone } from './utils/consumeStream';
 export { AgentRuntimeError } from './utils/createError';
 export { getModelPropertyWithFallback } from './utils/getFallbackModelProperty';
 export { getModelPricing } from './utils/getModelPricing';
+export {
+  applyModelExtendParams,
+  type ApplyModelExtendParamsContext,
+  type ModelExtendParams,
+  resolveDefaultThinkingLevelForModel,
+} from './utils/modelExtendParams';
 export { parseDataUri } from './utils/uriParser';

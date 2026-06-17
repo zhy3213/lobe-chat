@@ -2,8 +2,6 @@ name: Upstream Sync
 
 permissions:
   contents: write
-  issues: write
-  actions: write
 
 on:
   schedule:
@@ -65,46 +63,46 @@ jobs:
           fi
 
           if ! git merge --no-edit "$upstream_sha"; then
-            git status --short
+            conflicts="$(git diff --name-only --diff-filter=U)"
 
-            issue_body="$(mktemp)"
-            {
+            if [ "$conflicts" = ".github/workflows/sync.yml" ]; then
+              echo "Only .github/workflows/sync.yml conflicted; keeping fork deployment workflow."
+              git checkout --ours .github/workflows/sync.yml
+              git add .github/workflows/sync.yml
+              git commit --no-edit
+            else
+              git status --short
+
+              {
+                echo "### Automatic upstream sync failed"
+                echo
+                echo "Automatic upstream sync failed while merging \`lobehub/lobe-chat:canary\` into \`next\`."
+                echo
+                echo "- Target before sync: \`${before_sha}\`"
+                echo "- Upstream canary: \`${upstream_sha}\`"
+                echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+                echo
+                echo "Resolve locally with:"
+                echo
+                echo '```bash'
+                echo "git fetch origin next"
+                echo "git fetch https://github.com/lobehub/lobe-chat.git canary"
+                echo "git checkout next"
+                echo "git reset --hard origin/next"
+                echo "git merge FETCH_HEAD"
+                echo "# resolve conflicts"
+                echo "git push origin next"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+
               echo "Automatic upstream sync failed while merging \`lobehub/lobe-chat:canary\` into \`next\`."
               echo
               echo "- Target before sync: \`${before_sha}\`"
               echo "- Upstream canary: \`${upstream_sha}\`"
               echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-              echo
-              echo "Resolve locally with:"
-              echo
-              echo '```bash'
-              echo "git fetch origin next"
-              echo "git fetch https://github.com/lobehub/lobe-chat.git canary"
-              echo "git checkout next"
-              echo "git reset --hard origin/next"
-              echo "git merge FETCH_HEAD"
-              echo "# resolve conflicts"
-              echo "git push origin next"
-              echo '```'
-            } > "$issue_body"
 
-            existing_issue="$(
-              gh issue list \
-                --state open \
-                --search 'Automatic upstream sync failed in:title' \
-                --json number \
-                --jq '.[0].number // empty' || true
-            )"
-
-            if [ -n "$existing_issue" ]; then
-              gh issue comment "$existing_issue" --body-file "$issue_body" || true
-            else
-              gh issue create \
-                --title 'Automatic upstream sync failed' \
-                --body-file "$issue_body" || true
+              exit 1
             fi
-
-            exit 1
           fi
 
           after_sha="$(git rev-parse HEAD)"

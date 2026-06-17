@@ -508,12 +508,34 @@ describe('createServerAgentToolsEngine', () => {
       expect(result.enabledToolIds).not.toContain(LocalSystemManifest.identifier);
     });
 
-    it('should disable LocalSystem when runtimeMode is explicitly set to cloud', () => {
+    it('should disable LocalSystem when executionTarget is sandbox', () => {
       const context = createMockContext();
       const engine = createServerAgentToolsEngine(context, {
         agentConfig: {
+          agencyConfig: { executionTarget: 'sandbox' },
           plugins: [LocalSystemManifest.identifier],
-          chatConfig: { runtimeEnv: { runtimeMode: { desktop: 'cloud' } } },
+        },
+        canUseDevice: true,
+        deviceContext: { gatewayConfigured: true, deviceOnline: true, autoActivated: true },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      const result = engine.generateToolsDetailed({
+        toolIds: [LocalSystemManifest.identifier],
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      expect(result.enabledToolIds).not.toContain(LocalSystemManifest.identifier);
+    });
+
+    it('should disable LocalSystem when executionTarget is none', () => {
+      const context = createMockContext();
+      const engine = createServerAgentToolsEngine(context, {
+        agentConfig: {
+          agencyConfig: { executionTarget: 'none' },
+          plugins: [LocalSystemManifest.identifier],
         },
         canUseDevice: true,
         deviceContext: { gatewayConfigured: true, deviceOnline: true, autoActivated: true },
@@ -574,12 +596,109 @@ describe('createServerAgentToolsEngine', () => {
       expect(result.enabledToolIds).not.toContain(RemoteDeviceManifest.identifier);
     });
 
+    it('should disable RemoteDevice when executionTarget is none — 无设备 means NO device', () => {
+      const context = createMockContext();
+      const engine = createServerAgentToolsEngine(context, {
+        agentConfig: {
+          agencyConfig: { executionTarget: 'none' },
+          plugins: [RemoteDeviceManifest.identifier],
+        },
+        canUseDevice: true,
+        deviceContext: { gatewayConfigured: true },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      const result = engine.generateToolsDetailed({
+        toolIds: [RemoteDeviceManifest.identifier],
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      expect(result.enabledToolIds).not.toContain(RemoteDeviceManifest.identifier);
+    });
+
+    it('should disable RemoteDevice when executionTarget is sandbox — sandbox and devices are mutually exclusive', () => {
+      const context = createMockContext();
+      const engine = createServerAgentToolsEngine(context, {
+        agentConfig: {
+          agencyConfig: { executionTarget: 'sandbox' },
+          plugins: [RemoteDeviceManifest.identifier],
+        },
+        canUseDevice: true,
+        deviceContext: { gatewayConfigured: true },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      const result = engine.generateToolsDetailed({
+        toolIds: [RemoteDeviceManifest.identifier],
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      expect(result.enabledToolIds).not.toContain(RemoteDeviceManifest.identifier);
+    });
+
     it('should disable RemoteDevice when device is already auto-activated', () => {
       const context = createMockContext();
       const engine = createServerAgentToolsEngine(context, {
         agentConfig: { plugins: [RemoteDeviceManifest.identifier] },
         canUseDevice: true,
         deviceContext: { gatewayConfigured: true, autoActivated: true },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      const result = engine.generateToolsDetailed({
+        toolIds: [RemoteDeviceManifest.identifier],
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      expect(result.enabledToolIds).not.toContain(RemoteDeviceManifest.identifier);
+    });
+
+    it('should disable RemoteDevice when a device is explicitly bound (locked to the selection)', () => {
+      // A user-selected (bound) device locks the run to that device — the
+      // activate-device tool is never offered, so the model cannot switch.
+      const context = createMockContext();
+      const engine = createServerAgentToolsEngine(context, {
+        agentConfig: { plugins: [RemoteDeviceManifest.identifier] },
+        canUseDevice: true,
+        deviceContext: {
+          autoActivated: true,
+          boundDeviceId: 'device-001',
+          deviceOnline: true,
+          gatewayConfigured: true,
+        },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      const result = engine.generateToolsDetailed({
+        toolIds: [RemoteDeviceManifest.identifier],
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      expect(result.enabledToolIds).not.toContain(RemoteDeviceManifest.identifier);
+    });
+
+    it('should disable RemoteDevice when the bound device is OFFLINE — no silent hop to another machine', () => {
+      // The bound device going offline makes the plan device-unrouted, so
+      // `autoActivated` is false. Without the `boundDeviceId` gate the tool
+      // would resurface and let the model activate a *different* online device.
+      // The explicit selection must keep the run locked instead.
+      const context = createMockContext();
+      const engine = createServerAgentToolsEngine(context, {
+        agentConfig: { plugins: [RemoteDeviceManifest.identifier] },
+        canUseDevice: true,
+        deviceContext: {
+          boundDeviceId: 'device-001',
+          deviceOnline: true,
+          gatewayConfigured: true,
+        },
         model: 'gpt-4',
         provider: 'openai',
       });

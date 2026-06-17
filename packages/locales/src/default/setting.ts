@@ -1,18 +1,18 @@
 export default {
   '_cloud.officialProvider': '{{name}} Official Model Service',
   'about.title': 'About',
-  'agentImport.action': 'Import to workspace…',
+  'agentImport.action': 'Copy to Workspace...',
   'agentImport.description':
-    'Fork a copy of this agent into one of your workspaces. The original stays in your personal space — no sync after import.',
-  'agentImport.failed': 'Failed to import agent.',
+    'Create an independent copy in a Workspace. The original Agent stays in your personal account.',
+  'agentImport.failed': 'Failed to copy agent.',
   'agentImport.modal.configIncluded': 'Agent configuration is copied by default.',
-  'agentImport.modal.confirm': 'Import',
+  'agentImport.modal.confirm': 'Copy',
   'agentImport.modal.includeHistory': 'Copy topics and messages',
   'agentImport.modal.includeHistoryDesc':
     'Optional. Copies this agent’s conversation history into the new agent.',
   'agentImport.modal.knowledgeNotice': 'Knowledge bindings and files are not copied yet.',
-  'agentImport.success': 'Agent imported to {{name}}.',
-  'agentImport.title': 'Import to workspace',
+  'agentImport.success': 'Agent copied to {{name}}.',
+  'agentImport.title': 'Copy to Workspace',
   'accountDeletion.cancelButton': 'Cancel Deletion',
   'accountDeletion.cancelConfirmTitle': 'Cancel account deletion request?',
   'accountDeletion.cancelFailed': 'Failed to cancel deletion request',
@@ -353,8 +353,50 @@ export default {
   'devices.edit.friendlyNamePlaceholder': 'A name to recognize this device',
   'devices.edit.save': 'Save',
   'devices.edit.title': 'Edit device',
-  'devices.empty':
-    'No devices yet. Connect one with `lh connect` or by signing in to the desktop app.',
+  'devices.capabilities.commands.desc': 'Safely execute terminal commands in your environment.',
+  'devices.capabilities.commands.title': 'Run commands',
+  'devices.capabilities.files.desc':
+    'Let agents directly access and organize the files on your computer.',
+  'devices.capabilities.files.title': 'Read & write local files',
+  'devices.capabilities.title': 'What you can do once connected',
+  'devices.capabilities.tools.desc': 'Connect local tools to extend what agents can do.',
+  'devices.capabilities.tools.title': 'Call system tools',
+  'devices.connectWizard.button': 'Connect Device',
+  'devices.connectWizard.cli.connectDesc':
+    'Start the background daemon to keep the device online and listening for remote operations.',
+  'devices.connectWizard.cli.connectTitle': 'Start the daemon',
+  'devices.connectWizard.cli.installDesc':
+    'Install the LobeHub CLI globally with your preferred package manager to enable device connectivity and management.',
+  'devices.connectWizard.cli.installTitle': 'Install the CLI',
+  'devices.connectWizard.cli.loginDesc':
+    'Complete OAuth authorization in your browser to link the CLI with your account.',
+  'devices.connectWizard.cli.loginTitle': 'Sign in',
+  'devices.connectWizard.desktop.downloadLink': 'Download LobeHub Desktop',
+  'devices.connectWizard.desktop.step1': 'Download the desktop app',
+  'devices.connectWizard.desktop.step1Desc':
+    'Visit the LobeHub downloads page and get the app for your operating system.',
+  'devices.connectWizard.desktop.step2': 'Sign in and open the device gateway',
+  'devices.connectWizard.desktop.step2Desc':
+    "After signing in, click the device gateway icon in the top-right corner and confirm it's turned on.",
+  'devices.connectWizard.desktop.step3': 'Your device appears automatically',
+  'devices.connectWizard.desktop.step3Desc':
+    "The desktop app registers itself as a device on launch — you'll see it in the list once connected.",
+  'devices.connectWizard.footer':
+    'Only device metadata is registered — your data is never accessed.',
+  'devices.connectWizard.method.cli': 'Via CLI',
+  'devices.connectWizard.method.desktop': 'Via Desktop',
+  'devices.connectWizard.subtitle': 'Choose how to connect your computer to LobeHub.',
+  'devices.connectWizard.title': 'Connect Device',
+  'devices.empty.desc':
+    'Once connected, LobeHub agents can read/write files, run commands, and call system tools directly on your computer.',
+  'devices.empty.methodCli.desc':
+    'Install the CLI in your terminal — great for servers or headless machines.',
+  'devices.empty.methodCli.title': 'Connect via CLI',
+  'devices.empty.methodDesktop.badge': 'Recommended',
+  'devices.empty.methodDesktop.desc':
+    'Download the desktop app, sign in, and your device connects automatically.',
+  'devices.empty.methodDesktop.title': 'Connect via Desktop',
+  'devices.empty.title': 'Connect your first device',
   'devices.fallbackBadge': 'Unstable identity',
   'devices.fallbackTooltip':
     "This device couldn't be identified by its machine ID, so reinstalling the app may create a duplicate entry.",
@@ -566,6 +608,7 @@ export default {
   'notification.item.image_generation_completed': 'Image generation completed',
   'notification.item.storage_overage_cap_reached': 'Storage pay-as-you-go cap reached',
   'notification.item.video_generation_completed': 'Video generation completed',
+  'notification.item.workspace_member_invited': 'Workspace invitation',
   'notification.item.workspace_member_joined': 'New member joined',
   'notification.item.workspace_member_removed': 'Removed from workspace',
   'notification.item.workspace_payment_failed': 'Renewal payment failed',
@@ -990,19 +1033,19 @@ When I am ___, I need ___
     '[Skill Request] Summarize the skill you need in one sentence',
   'skillStore.wantMore.reachedEnd': "You've reached the end. Can't find what you need?",
   'startConversation': 'Start Conversation',
-  'storage.actions.transfer.button': 'Transfer To',
+  'storage.actions.transfer.button': 'Move to...',
   'storage.actions.transfer.desc':
-    'Move agents and their data to a workspace you have access to. LobeAI, the default inbox Agent, cannot be transferred; use Copy Agents to copy it to a workspace or personal account instead.',
-  'storage.actions.transfer.title': 'Agents Migration',
-  'storage.actions.transferAgentGroups.button': 'Transfer To',
+    'Move agents and their data to another Workspace or your personal account. The originals leave the current space. LobeAI cannot be moved; copy it instead.',
+  'storage.actions.transfer.title': 'Move Agents',
+  'storage.actions.transferAgentGroups.button': 'Move to...',
   'storage.actions.transferAgentGroups.desc':
-    'Move agent groups, their members, and group conversation data to a workspace you have access to.',
-  'storage.actions.transferAgentGroups.title': 'Agent Groups Migration',
-  'storage.actions.copyLobeAI.button': 'Copy To',
+    'Move groups, member Agents, and group conversation data to another Workspace or your personal account.',
+  'storage.actions.transferAgentGroups.title': 'Move Groups',
+  'storage.actions.copyLobeAI.button': 'Copy to...',
   'storage.actions.copyLobeAI.desc':
-    'Copy agents, including LobeAI, into another workspace or personal account. Topics and messages are optional.',
-  'storage.actions.copyLobeAI.title': 'Agents Copy',
-  'storage.actions.copyAgentGroups.button': 'Copy To',
+    'Keep the originals and create independent copies in another Workspace or your personal account. Topics and messages are optional.',
+  'storage.actions.copyLobeAI.title': 'Copy Agents',
+  'storage.actions.copyAgentGroups.button': 'Copy to...',
   'storage.actions.copyAgentGroups.desc':
     'Copy agent groups and their member agents into another workspace or personal account.',
   'storage.actions.copyAgentGroups.title': 'Agent Groups Copy',
@@ -1158,6 +1201,9 @@ When I am ___, I need ___
   'tab.about': 'About',
   'tab.advanced': 'Advanced',
   'tab.advanced.appUpdates.title': 'App updates',
+  'tab.advanced.gatewayMode.desc':
+    'Run supported agent tasks through the cloud Gateway by default. Individual agents can override this from the chat menu.',
+  'tab.advanced.gatewayMode.title': 'Gateway Mode',
   'tab.advanced.toolsAndDiagnostics.title': 'Tools and diagnostics',
   'tab.addAgentSkill': 'Add Agent Skill',
   'tab.advanced.updateChannel.canary': 'Canary',
@@ -1477,7 +1523,7 @@ When I am ___, I need ___
   'workspace.billingPage.plans.modelsHint': 'Estimated messages from the shared pool',
   'workspace.billingPage.plans.modelsTitle': 'Featured models',
   'workspace.billingPage.plans.perMonth': '/ month',
-  'workspace.billingPage.plans.popularTag': 'Popular',
+  'workspace.billingPage.plans.popularTag': 'Recommended',
   'workspace.billingPage.plans.priceProCaption': 'Platform fee · billed monthly',
   'workspace.billingPage.plans.priceProHeadline': '${{fee}} / mo',
   'workspace.billingPage.plans.proCapacity': 'Up to {{max}} seats · ${{seatFee}}/seat / month',
@@ -1602,19 +1648,20 @@ When I am ___, I need ___
     'You will lose access to "{{name}}" immediately. You can rejoin only if you are invited again.',
   'workspace.general.transferAgents.modal.back': 'Back',
   'workspace.general.transferAgents.modal.continue': 'Continue',
-  'workspace.general.transferAgents.modal.failed': 'Failed to transfer agents',
+  'workspace.general.transferAgents.modal.failed': 'Failed to move agents',
   'workspace.general.transferAgents.modal.loadFailed': 'Failed to load agents',
   'workspace.general.transferAgents.modal.noAgents': 'No agents in this workspace',
-  'workspace.general.transferAgents.modal.selectAgents': 'Select agents to transfer to {{target}}.',
+  'workspace.general.transferAgents.modal.selectAgents': 'Select Agents to move to {{target}}.',
   'workspace.general.transferAgents.modal.selectPlaceholder':
     'Select workspace or personal account...',
   'workspace.general.transferAgents.modal.selectTarget':
-    'Choose a workspace or personal account to transfer agents to.',
+    'Choose where to move the Agents. They will leave the current space.',
   'workspace.general.transferAgents.modal.selected': 'selected',
-  'workspace.general.transferAgents.modal.selectedAgent': 'Agent to transfer to {{target}}.',
-  'workspace.general.transferAgents.modal.success': '{{count}} agent(s) transferred successfully',
-  'workspace.general.transferAgents.modal.title': 'Transfer Agents',
-  'workspace.general.transferAgents.modal.transfer': 'Transfer {{count}} agent(s)',
+  'workspace.general.transferAgents.modal.selectedAgent':
+    'This Agent will move to {{target}} and leave the current space.',
+  'workspace.general.transferAgents.modal.success': '{{count}} agent(s) moved',
+  'workspace.general.transferAgents.modal.title': 'Move Agents',
+  'workspace.general.transferAgents.modal.transfer': 'Move {{count}} agent(s)',
   'workspace.general.transferAgents.modal.warning':
     'Custom plugins may not be available and multi-agent group associations will be removed.',
   'workspace.general.transferAgents.personalAccount': 'Personal Account',
@@ -1638,10 +1685,10 @@ When I am ___, I need ___
   'workspace.general.copyLobeAI.modal.back': 'Back',
   'workspace.general.copyLobeAI.modal.continue': 'Continue',
   'workspace.general.copyLobeAI.modal.copyOptions.config.desc':
-    'Required. Copies the model, prompt, tools, and Agent profile.',
+    'Required. Copies the model, prompt, tools, and Agent profile into a new Agent.',
   'workspace.general.copyLobeAI.modal.copyOptions.config.title': 'Agent configuration',
   'workspace.general.copyLobeAI.modal.copyOptions.history.desc':
-    'Optional. Copies selected agents’ topics and messages into the new agents.',
+    'Optional. Copies selected Agents’ topics and messages into the new Agents.',
   'workspace.general.copyLobeAI.modal.copyOptions.history.title': 'Topics and messages',
   'workspace.general.copyLobeAI.modal.copyOptions.knowledgeBase.reason':
     'Not supported yet. Reconnect them in the target workspace or personal account after copying.',
@@ -1655,15 +1702,17 @@ When I am ___, I need ___
   'workspace.general.copyLobeAI.modal.failed': 'Failed to copy agents',
   'workspace.general.copyLobeAI.modal.includeHistory': 'Copy topics and messages',
   'workspace.general.copyLobeAI.modal.includeHistoryDesc':
-    'Optional. Copies selected agents’ conversation history into the new agents.',
+    'Optional. Copies selected Agents’ conversation history into the new Agents.',
   'workspace.general.copyLobeAI.modal.loadFailed': 'Failed to load agents',
   'workspace.general.copyLobeAI.modal.noAgents': 'No agents available to copy',
   'workspace.general.copyLobeAI.modal.selected': 'selected',
-  'workspace.general.copyLobeAI.modal.selectedAgent': 'Agent to copy.',
-  'workspace.general.copyLobeAI.modal.selectAgents': 'Select agents to copy.',
+  'workspace.general.copyLobeAI.modal.selectedAgent':
+    'This Agent will be copied. The original stays where it is.',
+  'workspace.general.copyLobeAI.modal.selectAgents':
+    'Select Agents to copy. Originals stay where they are.',
   'workspace.general.copyLobeAI.modal.selectPlaceholder': 'Select workspace or personal account...',
   'workspace.general.copyLobeAI.modal.selectTarget':
-    'Choose the target workspace or personal account. Agent configuration is copied by default.',
+    'Choose where to create the copies. The originals stay where they are.',
   'workspace.general.copyLobeAI.modal.success': '{{count}} agent(s) copied',
   'workspace.general.copyLobeAI.modal.title': 'Copy Agents',
   'workspace.general.copyLobeAI.modal.untitledAgent': 'Untitled Agent',
@@ -1856,6 +1905,7 @@ When I am ___, I need ___
     'Add new members by entering their email address and assigning a role',
   'workspace.members.invite.addAnother': 'Add another',
   'workspace.members.invite.button': 'Invite',
+  'workspace.members.invite.modal.billIncrease': ' Your bill will increase by ${{amount}}/mo.',
   'workspace.members.invite.modal.cancel': 'Cancel',
   'workspace.members.invite.modal.confirm': 'Confirm',
   'workspace.members.invite.modal.description_one':
@@ -1892,7 +1942,7 @@ When I am ___, I need ___
   'workspace.upgradeModal.alreadyUpgraded': 'Already upgraded',
   'workspace.upgradeModal.changeWorkspace': 'Back',
   'workspace.upgradeModal.chargeDisclosure':
-    'Upon clicking Upgrade, you will be charged ${{fee}}, plus any applicable taxes and fees, immediately and then every month, until you cancel. Seat fees and on-demand usage are settled at month-end; if your usage exceeds a billing threshold during a cycle, your payment method on file may be charged before the cycle ends.',
+    'Clicking Upgrade charges ${{fee}} now, plus any applicable taxes. The subscription renews monthly until you cancel. Seats and on-demand usage are billed at month-end.',
   'workspace.upgradeModal.inviteLaterHint':
     'You can invite more members to your team in the next step.',
   'workspace.upgradeModal.memberCount_one': '{{count}} member',
@@ -1905,6 +1955,7 @@ When I am ___, I need ___
   'workspace.upgradeModal.createTeam': 'Create workspace',
   'workspace.upgradeModal.formSubtitle':
     'Only the platform fee is charged today — seat fees are settled at month-end.',
+  'workspace.upgradeModal.formDescription': 'Review the details below and confirm your upgrade.',
   'workspace.upgradeModal.formTitle': 'Upgrade {{name}} to Pro',
   'workspace.upgradeModal.heading': 'Upgrade a workspace to Pro',
   'workspace.upgradeModal.hobbyTag': 'Hobby',
@@ -1970,7 +2021,6 @@ When I am ___, I need ___
   'workspace.wizard.step1.slug.invalidReserved': 'That slug is reserved. Please choose another.',
   'workspace.wizard.step1.slug.label': 'Workspace URL',
   'workspace.wizard.step1.slug.placeholder': 'example-team',
-  'workspace.wizard.step1.slug.prefix': 'lobehub.com/',
   'workspace.wizard.step1.slug.required': 'Workspace URL is required',
   'workspace.wizard.step1.slug.taken': 'This URL is already taken',
   'workspace.wizard.step1.subtitle': 'Unlock Agent Collaboration With Your Teammates',
@@ -2004,11 +2054,13 @@ When I am ___, I need ___
     "You've reached the maximum of {{limit}} workspaces. Leave one before creating another.",
   'workspace.wizard.step2.features.hobby.share': 'Single-owner workspace',
   'workspace.wizard.step2.features.hobby.solo': 'Solo workspace, no member seats',
-  'workspace.wizard.step2.features.hobby.onDemand': 'On-demand usage · AutoTopUp (${{price}}/M)',
+  'workspace.wizard.step2.features.hobby.onDemand':
+    'On-demand usage · Auto top-up (${{price}} / 1M credits)',
   'workspace.wizard.step2.features.hobby.upgradable': 'Upgrade anytime to invite members',
   'workspace.wizard.step2.features.pro.adminControls': 'Centralized billing, roles, and audit logs',
   'workspace.wizard.step2.features.pro.collaboration': 'Invite members · share agents and files',
-  'workspace.wizard.step2.features.pro.onDemand': 'On-demand usage · AutoTopUp (${{price}}/M)',
+  'workspace.wizard.step2.features.pro.onDemand':
+    'On-demand usage · Auto top-up (${{price}} / 1M credits)',
   'workspace.wizard.step2.features.pro.priorityModels': 'Priority premium models',
   'workspace.wizard.step2.features.pro.support': 'Priority email support',
   'workspace.wizard.step2.left.creditsHobbyHint': 'No monthly credits · pay as you go',
@@ -2271,164 +2323,169 @@ When I am ___, I need ___
   'tools.builtins.uninstallConfirm.title': 'Uninstall {{name}}',
   'tools.builtins.uninstalled': 'Uninstalled',
   'tools.disabled': 'The current model does not support function calls and cannot use the skill',
-  'tools.klavis.addServer': 'Add Server',
-  'tools.klavis.authCompleted': 'Authentication Completed',
-  'tools.klavis.authFailed': 'Authentication Failed',
-  'tools.klavis.authRequired': 'Authentication Required',
-  'tools.klavis.connect': 'Connect',
-  'tools.klavis.connected': 'Connected',
-  'tools.klavis.disconnect': 'Disconnect',
-  'tools.klavis.disconnected': 'Disconnected',
-  'tools.klavis.error': 'Error',
-  'tools.klavis.groupName': 'Klavis Tools',
-  'tools.klavis.manage': 'Manage Klavis',
-  'tools.klavis.manageTitle': 'Manage Klavis Integration',
-  'tools.klavis.noServers': 'No connected servers',
-  'tools.klavis.notEnabled': 'Klavis service not enabled',
-  'tools.klavis.oauthRequired': 'Please complete OAuth authentication in the new window',
-  'tools.klavis.pendingAuth': 'Pending Authentication',
-  'tools.klavis.serverCreated': 'Server created successfully',
-  'tools.klavis.serverCreatedFailed': 'Failed to create server',
-  'tools.klavis.serverRemoved': 'Server removed',
-  'tools.klavis.servers': 'servers',
+  'tools.composio.addServer': 'Add Server',
+  'tools.composio.authCompleted': 'Authentication Completed',
+  'tools.composio.authFailed': 'Authentication Failed',
+  'tools.composio.authRequired': 'Authentication Required',
+  'tools.composio.connect': 'Connect',
+  'tools.composio.connected': 'Connected',
+  'tools.composio.disconnect': 'Disconnect',
+  'tools.composio.disconnected': 'Disconnected',
+  'tools.composio.error': 'Error',
+  'tools.composio.remove': 'Remove',
+  'tools.composio.removeConfirm.desc':
+    '{{name}} will be permanently removed from your connected services. This action cannot be undone.',
+  'tools.composio.removeConfirm.title': 'Remove {{name}}?',
+  'tools.composio.groupName': 'Composio Tools',
+  'tools.composio.manage': 'Manage Composio',
+  'tools.composio.manageTitle': 'Manage Composio Integration',
+  'tools.composio.noServers': 'No connected servers',
+  'tools.composio.notEnabled': 'Composio service not enabled',
+  'tools.composio.oauthRequired': 'Please complete OAuth authentication in the new window',
+  'tools.composio.pendingAuth': 'Pending Authentication',
+  'tools.composio.reauthorize': 'Re-authorize',
+  'tools.composio.serverCreated': 'Server created successfully',
+  'tools.composio.serverCreatedFailed': 'Failed to create server',
+  'tools.composio.serverRemoved': 'Server removed',
+  'tools.composio.servers': 'servers',
 
-  'tools.klavis.servers.airtable.description':
+  'tools.composio.servers.airtable.description':
     'Airtable is a cloud-based database and spreadsheet platform that combines the flexibility of a spreadsheet with the power of a database, enabling teams to organize, track, and collaborate on projects with customizable views and powerful automation features',
 
-  'tools.klavis.servers.airtable.readme':
+  'tools.composio.servers.airtable.readme':
     'Integrate with Airtable to manage your databases and workflows. Query records, create entries, update data, and automate operations with customizable views and powerful tracking features.',
 
-  'tools.klavis.servers.cal-com.description':
+  'tools.composio.servers.cal-com.description':
     'Cal.com is an open-source scheduling platform that helps you schedule meetings without the back-and-forth emails. Manage event types, bookings, availability, and integrate with calendars for seamless appointment scheduling',
 
-  'tools.klavis.servers.cal-com.readme':
+  'tools.composio.servers.cal-com.readme':
     'Connect to Cal.com to manage your scheduling and appointments. View availability, book meetings, manage event types, and automate your calendar through natural conversation.',
 
-  'tools.klavis.servers.clickup.description':
+  'tools.composio.servers.clickup.description':
     'ClickUp is a comprehensive project management and productivity platform that helps teams organize tasks, manage projects, and collaborate effectively with customizable workflows and powerful tracking features',
 
-  'tools.klavis.servers.clickup.readme':
+  'tools.composio.servers.clickup.readme':
     'Connect to ClickUp to manage tasks, track projects, and organize your work. Create tasks, update statuses, manage custom workflows, and collaborate with your team through natural language commands.',
 
-  'tools.klavis.servers.confluence.description':
+  'tools.composio.servers.confluence.description':
     'Confluence is a team workspace where knowledge and collaboration meet',
 
-  'tools.klavis.servers.confluence.readme':
+  'tools.composio.servers.confluence.readme':
     'Connect to Confluence to access and manage team documentation. Search pages, create content, organize spaces, and build your knowledge base through conversational AI assistance.',
 
-  'tools.klavis.servers.dropbox.description':
+  'tools.composio.servers.dropbox.description':
     'Complete file management solution for Dropbox cloud storage. Upload, download, organize files and folders, manage sharing and collaboration, handle file versions, create file requests, and perform batch operations on your Dropbox files and folders',
 
-  'tools.klavis.servers.dropbox.readme':
+  'tools.composio.servers.dropbox.readme':
     'Integrate with Dropbox to access and manage your files. Upload, download, share files, manage folders, handle file versions, and organize your cloud storage through conversational AI.',
 
-  'tools.klavis.servers.figma.description':
+  'tools.composio.servers.figma.description':
     'Figma is a collaborative interface design tool for web and mobile applications.',
 
-  'tools.klavis.servers.figma.readme':
+  'tools.composio.servers.figma.readme':
     'Connect to Figma to access design files and collaborate on projects. View designs, export assets, browse components, and manage your design workflow through natural conversation.',
 
-  'tools.klavis.servers.github.description': 'Enhanced GitHub MCP Server',
+  'tools.composio.servers.github.description': 'Enhanced GitHub MCP Server',
 
-  'tools.klavis.servers.github.readme':
+  'tools.composio.servers.github.readme':
     'Connect to GitHub to manage repositories, issues, pull requests, and code. Search code, review changes, create branches, and collaborate on software development projects through conversational AI.',
 
-  // Klavis Servers i18n
-  'tools.klavis.servers.gmail.description': 'Gmail is a free email service provided by Google',
+  // Composio Servers i18n
+  'tools.composio.servers.gmail.description': 'Gmail is a free email service provided by Google',
 
-  'tools.klavis.servers.gmail.readme':
+  'tools.composio.servers.gmail.readme':
     'Bring the power of Gmail directly into your AI assistant. Read, compose, and send emails, search your inbox, manage labels, and organize your communications—all through natural conversation.',
 
-  'tools.klavis.servers.google-calendar.description':
+  'tools.composio.servers.google-calendar.description':
     'Google Calendar is a time-management and scheduling calendar service',
 
-  'tools.klavis.servers.google-calendar.readme':
+  'tools.composio.servers.google-calendar.readme':
     'Integrate Google Calendar to view, create, and manage your events seamlessly. Schedule meetings, set reminders, check availability, and coordinate your time—all through natural language commands.',
 
-  'tools.klavis.servers.google-docs.description':
+  'tools.composio.servers.google-docs.description':
     'Google Docs is a word processor included as part of the free, web-based Google Docs Editors suite',
 
-  'tools.klavis.servers.google-docs.readme':
+  'tools.composio.servers.google-docs.readme':
     'Integrate with Google Docs to create, edit, and manage documents. Write content, format text, collaborate in real-time, and access your documents through natural conversation.',
 
-  'tools.klavis.servers.google-drive.description': 'Google Drive is a cloud storage service',
+  'tools.composio.servers.google-drive.description': 'Google Drive is a cloud storage service',
 
-  'tools.klavis.servers.google-drive.readme':
+  'tools.composio.servers.google-drive.readme':
     'Connect to Google Drive to access, organize, and manage your files. Search documents, upload files, share content, and navigate your cloud storage efficiently through AI assistance.',
 
-  'tools.klavis.servers.google-sheets.description':
+  'tools.composio.servers.google-sheets.description':
     'Google Sheets is a web-based spreadsheet application that allows users to create, edit, and collaborate on spreadsheets online',
 
-  'tools.klavis.servers.google-sheets.readme':
+  'tools.composio.servers.google-sheets.readme':
     'Connect to Google Sheets to read, write, and analyze spreadsheet data. Perform calculations, generate reports, create charts, and manage tabular data collaboratively with AI assistance.',
 
-  'tools.klavis.servers.hubspot.description':
+  'tools.composio.servers.hubspot.description':
     'HubSpot is a developer and marketer of software products for inbound marketing, sales, and customer service',
 
-  'tools.klavis.servers.hubspot.readme':
+  'tools.composio.servers.hubspot.readme':
     'Integrate with HubSpot to manage contacts, deals, and marketing campaigns. Access CRM data, track pipelines, automate workflows, and streamline your sales and marketing operations.',
 
-  'tools.klavis.servers.jira.description':
+  'tools.composio.servers.jira.description':
     'Jira is a project management and issue tracking tool developed by Atlassian',
 
-  'tools.klavis.servers.jira.readme':
+  'tools.composio.servers.jira.readme':
     'Integrate with Jira to manage issues, track progress, and organize sprints. Create tickets, update statuses, query project data, and streamline your development workflow through natural conversation.',
 
-  'tools.klavis.servers.notion.description':
+  'tools.composio.servers.notion.description':
     'Notion is a collaborative productivity and note-taking application',
 
-  'tools.klavis.servers.notion.readme':
+  'tools.composio.servers.notion.readme':
     'Connect to Notion to access and manage your workspace. Create pages, search content, update databases, and organize your knowledge base—all through natural conversation with your AI assistant.',
 
-  'tools.klavis.servers.onedrive.description':
+  'tools.composio.servers.onedrive.description':
     'OneDrive is a file hosting service and synchronization service operated by Microsoft',
 
-  'tools.klavis.servers.onedrive.readme':
+  'tools.composio.servers.onedrive.readme':
     'Connect to OneDrive to access and manage your Microsoft cloud files. Upload, download, share files, organize folders, and collaborate on documents through AI-powered assistance.',
 
-  'tools.klavis.servers.outlook-mail.description':
+  'tools.composio.servers.outlook-mail.description':
     'Outlook Mail is a web-based suite of webmail, contacts, tasks, and calendaring services from Microsoft.',
 
-  'tools.klavis.servers.outlook-mail.readme':
+  'tools.composio.servers.outlook-mail.readme':
     'Integrate with Outlook Mail to read, send, and manage your Microsoft emails. Search messages, compose emails, manage folders, and organize your inbox through natural conversation.',
 
-  'tools.klavis.servers.salesforce.description':
+  'tools.composio.servers.salesforce.description':
     "Salesforce is the world's leading customer relationship management (CRM) platform that helps businesses connect with customers, partners, and potential customers",
 
-  'tools.klavis.servers.salesforce.readme':
+  'tools.composio.servers.salesforce.readme':
     'Connect to Salesforce to manage customer relationships and sales data. Query records, update opportunities, track leads, and automate your CRM workflows through natural language commands.',
 
-  'tools.klavis.servers.slack.description':
+  'tools.composio.servers.slack.description':
     'Slack is a messaging app for business that connects people to the information they need',
 
-  'tools.klavis.servers.slack.readme':
+  'tools.composio.servers.slack.readme':
     'Integrate with Slack to send messages, search conversations, and manage channels. Connect with your team, automate communication workflows, and access workspace information through natural language.',
 
-  'tools.klavis.servers.supabase.description': 'Supabase official MCP Server',
+  'tools.composio.servers.supabase.description': 'Supabase official MCP Server',
 
-  'tools.klavis.servers.supabase.readme':
+  'tools.composio.servers.supabase.readme':
     'Integrate with Supabase to manage your database and backend services. Query data, manage authentication, handle storage, and interact with your application backend through natural conversation.',
 
-  'tools.klavis.servers.whatsapp.description':
+  'tools.composio.servers.whatsapp.description':
     'WhatsApp Business API integration that enables sending text messages, media, and managing conversations with customers. Perfect for customer support, marketing campaigns, and automated messaging workflows through the official WhatsApp Business platform.',
 
-  'tools.klavis.servers.whatsapp.readme':
+  'tools.composio.servers.whatsapp.readme':
     'Integrate with WhatsApp Business to send messages, manage conversations, and engage with customers. Automate messaging workflows and handle communications through conversational AI.',
 
-  'tools.klavis.servers.youtube.description':
+  'tools.composio.servers.youtube.description':
     'YouTube is a video-sharing platform where users can upload, share, and discover content. Access video information, transcripts, and metadata programmatically.',
 
-  'tools.klavis.servers.youtube.readme':
+  'tools.composio.servers.youtube.readme':
     'Connect to YouTube to search videos, access transcripts, and retrieve video information. Analyze content, extract metadata, and discover videos through natural conversation.',
 
-  'tools.klavis.servers.zendesk.description': 'Zendesk is a customer service software company',
+  'tools.composio.servers.zendesk.description': 'Zendesk is a customer service software company',
 
-  'tools.klavis.servers.zendesk.readme':
+  'tools.composio.servers.zendesk.readme':
     'Integrate with Zendesk to manage support tickets and customer interactions. Create, update, and track support requests, access customer data, and streamline your support operations.',
 
-  'tools.klavis.tools': 'tools',
+  'tools.composio.tools': 'tools',
 
-  'tools.klavis.verifyAuth': 'I have completed authentication',
+  'tools.composio.verifyAuth': 'I have completed authentication',
 
   'tools.lobehubSkill.authorize': 'Authorize',
 

@@ -147,6 +147,24 @@ export interface DeviceGitWorkingTreeStatus {
 }
 
 /**
+ * One git worktree attached to a repository, returned by the `listGitWorktrees`
+ * device RPC. Mirrors the desktop `GitWorktreeListItem`.
+ */
+export interface DeviceGitWorktreeListItem {
+  bare?: boolean;
+  branch?: string;
+  current: boolean;
+  detached?: boolean;
+  head?: string;
+  locked?: boolean;
+  lockReason?: string;
+  path: string;
+  prunable?: boolean;
+  pruneReason?: string;
+  status?: DeviceGitWorkingTreeStatus;
+}
+
+/**
  * Commit divergence vs the upstream tracking ref, returned by the
  * `getGitAheadBehind` device RPC. Mirrors the desktop shape.
  */
@@ -270,6 +288,18 @@ export interface DeviceGitFileRevertResult {
   success: boolean;
 }
 
+/** Result of the `renameGitBranch` device RPC. Mirrors the desktop `GitRenameBranchResult`. */
+export interface DeviceGitRenameBranchResult {
+  error?: string;
+  success: boolean;
+}
+
+/** Result of the `deleteGitBranch` device RPC. Mirrors the desktop `GitDeleteBranchResult`. */
+export interface DeviceGitDeleteBranchResult {
+  error?: string;
+  success: boolean;
+}
+
 /**
  * Repo-relative paths of dirty working-tree files for a directory on a remote
  * device, returned by the `getGitWorkingTreeFiles` device RPC. Powers the Files
@@ -302,6 +332,73 @@ export interface DeviceProjectFileIndexResult {
   root: string;
   source: 'git' | 'glob';
   totalCount: number;
+}
+
+export interface DeviceLocalFilePreviewText {
+  content: string;
+  contentType: string;
+  type: 'text';
+}
+
+export interface DeviceLocalFilePreviewImage {
+  base64: string;
+  contentType: string;
+  type: 'image';
+}
+
+export interface DeviceLocalFilePreviewUnsupported {
+  contentType: string;
+  type: 'binary' | 'pdf' | 'video';
+}
+
+export type DeviceLocalFilePreview =
+  | DeviceLocalFilePreviewImage
+  | DeviceLocalFilePreviewText
+  | DeviceLocalFilePreviewUnsupported;
+
+/**
+ * File preview payload for a file on a remote device. Mirrors the desktop local
+ * file preview result but carries binary image content as base64 so it can cross
+ * the Gateway/RPC boundary.
+ */
+export interface DeviceLocalFilePreviewResult {
+  error?: string;
+  preview?: DeviceLocalFilePreview;
+  success: boolean;
+}
+
+/** One file/folder to move within a directory on a remote device. Mirrors `MoveLocalFileParams`. */
+export interface DeviceMoveProjectFileItem {
+  newPath: string;
+  oldPath: string;
+}
+
+/**
+ * Per-item result of the `moveLocalFiles` device RPC. The move is batched and
+ * each item succeeds or fails independently. Mirrors the desktop
+ * `LocalMoveFilesResultItem`.
+ */
+export interface DeviceMoveProjectFileResultItem {
+  error?: string;
+  newPath?: string;
+  sourcePath: string;
+  success: boolean;
+}
+
+/** Result of the `renameLocalFile` device RPC. Mirrors the desktop `RenameLocalFileResult`. */
+export interface DeviceRenameProjectFileResult {
+  error?: string;
+  newPath: string;
+  success: boolean;
+}
+
+/**
+ * Result of the `writeLocalFile` device RPC — saving edited content back to a
+ * file on a remote device. Mirrors the desktop `WriteFileResult`.
+ */
+export interface DeviceWriteProjectFileResult {
+  error?: string;
+  success: boolean;
 }
 
 /**
