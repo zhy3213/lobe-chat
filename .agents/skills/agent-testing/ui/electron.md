@@ -30,6 +30,14 @@ After `start` succeeds, connect with: `agent-browser --cdp 9222 snapshot -i`
 
 **Always run `$SCRIPT stop` when done testing** — `pkill -f "Electron"` alone won't catch all helper processes.
 
+> **Concurrent instances (N worktrees / parallel verification)?** `electron-dev.sh`
+> drives a pool: `start <id>` gives each instance its own CDP port, userData dir
+> (with copied login state), and — via env — its own Vite port + IPC id, so
+> multiple isolated dev instances run at once. Drive each with a distinct
+> `agent-browser --session s<port> --cdp <port>` (the daemon otherwise reuses one
+> session across ports). Full design, the collision matrix, and the login-copy
+> recipe: [../references/multi-instance.md](../references/multi-instance.md).
+
 #### Environment Variables
 
 | Variable          | Default                 | Description                              |
@@ -138,6 +146,25 @@ agent-browser --cdp 9222 eval "JSON.stringify(window.__CAPTURED_ERRORS)"
 ```
 
 ## Electron Gotchas
+
+- **`agent-browser screenshot` can wedge; prefer raw-CDP capture.** `agent-browser`
+  routes captures through a long-lived daemon. An interrupted or mis-invoked
+  screenshot (a stalled `--full` on a huge page, a killed/backgrounded command, a
+  bad flag) can leave the daemon's CDP session half-open, after which **every**
+  later screenshot fails with `CDP response channel closed` / `daemon busy` — even
+  though `eval` / `get url` still work. This is **not** a display-sleep or
+  permission problem: raw `Page.captureScreenshot` is fast (\~60ms) and works even
+  when the display is asleep or the window is minimized/occluded (verified). Use
+  the raw-CDP helper for Electron evidence and as a preflight:
+
+  ```bash
+  ./.agents/skills/agent-testing/scripts/cdp-screenshot.sh --check               # preflight: PASS ⇒ capture works
+  ./.agents/skills/agent-testing/scripts/cdp-screenshot.sh --out shot.png        # viewport
+  ./.agents/skills/agent-testing/scripts/cdp-screenshot.sh --out full.png --full # full page (captureBeyondViewport)
+  ```
+
+  If agent-browser's own screenshot has already wedged, reset it with
+  `agent-browser close --all` (raw-CDP does not use that daemon and is unaffected).
 
 - **Always use `electron-dev.sh stop` to clean up** — `pkill -f "Electron"` only kills the main process; helper processes (GPU, renderer, network) survive. The script finds and kills all of them via PID matching against the project's electron binary path.
 

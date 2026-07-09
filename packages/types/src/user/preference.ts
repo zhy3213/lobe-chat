@@ -51,6 +51,10 @@ export const UserLabSchema = z.object({
    */
   enableFleet: z.boolean().optional(),
   /**
+   * fold a finished agent turn's process under a "已处理" header when its final answer is visible
+   */
+  enableFoldFinishedTurn: z.boolean().optional(),
+  /**
    * enable multi-agent group chat mode
    */
   enableGroupChat: z.boolean().optional(),
@@ -62,6 +66,10 @@ export const UserLabSchema = z.object({
    * enable markdown rendering in chat input editor
    */
   enableInputMarkdown: z.boolean().optional(),
+  /**
+   * enable selecting message text and adding it to the next conversation context
+   */
+  enableMessageTextSelectionActions: z.boolean().optional(),
   /**
    * show the "Add Platform Agent" entry in the create menu
    */
@@ -111,11 +119,7 @@ export interface UserPreference {
 }
 
 export type ReferralStatusString =
-  | 'pending_reward'
-  | 'registered'
-  | 'suspected'
-  | 'rewarded'
-  | 'revoked';
+  'pending_reward' | 'registered' | 'suspected' | 'rewarded' | 'revoked';
 
 export interface UserInitializationState {
   agentOnboarding?: UserAgentOnboarding;

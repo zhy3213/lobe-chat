@@ -3,6 +3,7 @@ import {
   type RecentTopic,
   type RecentTopicGroup,
   type RecentTopicGroupMember,
+  serializedAgentHookSchema,
 } from '@lobechat/types';
 import { cleanObject } from '@lobechat/utils';
 import { inArray } from 'drizzle-orm';
@@ -30,6 +31,7 @@ import {
   resolveContext,
 } from './_helpers/resolveContext';
 import { basicContextSchema } from './_schema/context';
+import { workingDirConfigSchema } from './workingDirSchema';
 
 const topicProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) => {
   const { ctx } = opts;
@@ -646,6 +648,7 @@ export const topicRouter = router({
         metadata: z.object({
           boundDeviceId: z.string().optional(),
           heteroSessionId: z.string().optional(),
+          heteroSessionIdByWorkingDirectory: z.record(z.string()).optional(),
           model: z.string().optional(),
           onboardingFeedback: z
             .object({
@@ -683,13 +686,7 @@ export const topicRouter = router({
           runningOperation: z
             .object({
               assistantMessageId: z.string(),
-              completionWebhook: z
-                .object({
-                  body: z.record(z.unknown()).optional(),
-                  delivery: z.enum(['fetch', 'qstash']).optional(),
-                  url: z.string(),
-                })
-                .optional(),
+              hooks: z.array(serializedAgentHookSchema).optional(),
               operationId: z.string(),
               scope: z.string().optional(),
               threadId: z.string().nullish(),
@@ -698,6 +695,7 @@ export const topicRouter = router({
             .optional(),
           repos: z.array(z.string()).optional(),
           workingDirectory: z.string().optional(),
+          workingDirectoryConfig: workingDirConfigSchema.optional(),
         }),
       }),
     )

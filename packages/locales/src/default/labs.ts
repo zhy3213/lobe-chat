@@ -11,6 +11,9 @@ export default {
   'features.fleet.desc':
     'Show the Fleet entry in the title bar — a side-by-side dashboard of all running tasks across your agents.',
   'features.fleet.title': 'Fleet View',
+  'features.foldFinishedTurn.desc':
+    'Collapse the process (reasoning and tool calls) of finished agent turns under a "Processed" header once the final answer is visible. Click to expand the process.',
+  'features.foldFinishedTurn.title': 'Fold Finished Turns',
   'features.imessage.desc':
     'Connect agents to iMessage through the local LobeHub Desktop BlueBubbles bridge.',
   'features.imessage.title': 'iMessage Channel',
@@ -19,6 +22,9 @@ export default {
   'features.inputMarkdown.desc':
     'Render Markdown in the input area in real time (bold text, code blocks, tables, etc.).',
   'features.inputMarkdown.title': 'Input Markdown Rendering',
+  'features.messageTextSelectionActions.desc':
+    'Show a quick action when selecting text in chat messages so the selected text can be added to the next conversation context.',
+  'features.messageTextSelectionActions.title': 'Message Text Selection Actions',
   'features.platformAgent.desc':
     'Show the "Connect Agent" entry in the create menu. Connected agents (e.g. OpenClaw, Hermes) run on your own devices and communicate back via lh connect.',
   'features.platformAgent.title': 'Connect Agent',

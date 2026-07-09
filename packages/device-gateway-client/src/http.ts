@@ -200,6 +200,8 @@ export class GatewayHttpClient {
 
   async dispatchAgentRun(params: {
     agentType: string;
+    /** Resolved `lh hetero exec` wrapper args. */
+    args?: string[];
     cwd?: string;
     deviceId?: string;
     /** Image attachments forwarded into the `agent_run_request` message. */
@@ -219,6 +221,14 @@ export class GatewayHttpClient {
       const text = await res.text().catch(() => '');
       return { error: text || `HTTP ${res.status}`, success: false };
     }
+    const data = await res.json().catch(() => null);
+    if (data && (data.success === false || data.status === 'rejected')) {
+      return {
+        error: data.error ?? data.reason ?? 'DEVICE_REJECTED',
+        success: false,
+      };
+    }
+
     return { success: true };
   }
 

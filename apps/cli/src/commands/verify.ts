@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import type { Command } from 'commander';
@@ -39,6 +39,9 @@ function assertEnum<T extends string>(value: T | undefined, allowed: T[], flag: 
 type Verdict = 'failed' | 'passed' | 'uncertain';
 type EvidenceType = 'dom_snapshot' | 'gif' | 'screenshot' | 'text' | 'transcript' | 'video';
 
+const INLINE_TEXT_EVIDENCE_LIMIT = 5000;
+const INLINE_TEXT_EVIDENCE_TYPES = new Set<EvidenceType>(['dom_snapshot', 'text', 'transcript']);
+
 /** Map a free-form case/summary result token onto the verify verdict vocabulary. */
 function toVerdict(raw: unknown): Verdict {
   const s = String(raw ?? '').toLowerCase();
@@ -57,6 +60,20 @@ function evidenceTypeForFile(file: string): EvidenceType {
   return 'text';
 }
 
+function inlineTextEvidenceForFile(file: string, type: EvidenceType | string): string | undefined {
+  if (!INLINE_TEXT_EVIDENCE_TYPES.has(type as EvidenceType)) return undefined;
+
+  try {
+    const buffer = readFileSync(file);
+    if (buffer.includes(0)) return undefined;
+
+    const content = buffer.toString('utf8');
+    return content.length > 0 && content.length < INLINE_TEXT_EVIDENCE_LIMIT ? content : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Normalize a case's `evidence` field (string | string[] | {path}[]) to path strings. */
 function evidencePaths(evidence: unknown): string[] {
   if (!evidence) return [];
@@ -66,12 +83,162 @@ function evidencePaths(evidence: unknown): string[] {
     .filter((p): p is string => typeof p === 'string' && p.length > 0);
 }
 
+function firstString(...values: unknown[]): string | undefined {
+  return values.find((v): v is string => typeof v === 'string' && v.length > 0);
+}
+
+function firstStringOrNumber(...values: unknown[]): string | number | undefined {
+  return values.find(
+    (v): v is string | number => (typeof v === 'string' && v.length > 0) || typeof v === 'number',
+  );
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function safeWebUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Normalize common agent-testing PR shapes into the verify coding scope. */
+function pullRequestFromResult(result: Record<string, unknown>) {
+  const pr = objectValue(result.pullRequest) ?? objectValue(result.pr);
+  const url = safeWebUrl(
+    firstString(
+      pr?.url,
+      pr?.htmlUrl,
+      pr?.html_url,
+      result.pullRequestUrl,
+      result.prUrl,
+      typeof result.pr === 'string' ? result.pr : undefined,
+    ),
+  );
+  const number = firstStringOrNumber(pr?.number, result.pullRequestNumber, result.prNumber);
+  const title = firstString(pr?.title, result.pullRequestTitle, result.prTitle);
+  const entries = Object.entries({ number, title, url }).filter(([, v]) => v !== undefined);
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function metadataForReport(
+  result: Record<string, unknown>,
+  existingMetadata?: unknown,
+): Record<string, unknown> | undefined {
+  if (!Object.prototype.hasOwnProperty.call(result, 'interactionCost')) return undefined;
+
+  const metadata = { ...objectValue(existingMetadata) };
+  const interactionCost = objectValue(result.interactionCost);
+
+  if (interactionCost) {
+    metadata.interactionCost = interactionCost;
+  } else {
+    delete metadata.interactionCost;
+  }
+
+  return metadata;
+}
+
+/**
+ * The report dir remembers which verification session it created, so
+ * re-verifying the same case updates one evolving `/verify/<id>` in place
+ * instead of spawning a fresh list entry every round. Kept in a sidecar (not
+ * result.json, which the harness regenerates each round) so it survives a
+ * rewrite of the report body.
+ */
+const RUN_SIDECAR = '.verify-run.json';
+
+function readSidecarRunId(dir: string): string | undefined {
+  const p = path.join(dir, RUN_SIDECAR);
+  if (!existsSync(p)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(p, 'utf8'));
+    return typeof parsed?.verifyRunId === 'string' ? parsed.verifyRunId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeSidecarRunId(dir: string, verifyRunId: string): void {
+  try {
+    writeFileSync(path.join(dir, RUN_SIDECAR), `${JSON.stringify({ verifyRunId }, null, 2)}\n`);
+  } catch {
+    // Best-effort: a read-only dir just means the next run creates a new session.
+  }
+}
+
 // ── Command Registration ───────────────────────────────────
 
 export function registerVerifyCommand(program: Command) {
   const verify = program
     .command('verify')
     .description('Manage the Agent Run delivery checker (criteria, rubrics, plans, results)');
+
+  // ════════════ init (materialize the portable verify skill) ════════════
+  verify
+    .command('init')
+    .description('Write the portable verify skill into a working dir (.claude/skills/verify)')
+    .option('--dir <path>', 'Target working directory (default: current dir)')
+    .option('--skill <id>', 'Skill identifier to pull', 'verify')
+    .option('--force', 'Overwrite existing skill files')
+    .option('--json [fields]', 'Output JSON')
+    .action(
+      async (options: {
+        dir?: string;
+        force?: boolean;
+        json?: boolean | string;
+        skill: string;
+      }) => {
+        const client = await getTrpcClient();
+        // Pulled live from the server's deployed builtin-skills — always the latest.
+        const bundle = await client.verify.getSkillBundle.query({ identifier: options.skill });
+
+        const baseDir = options.dir ? path.resolve(options.dir) : process.cwd();
+        const skillDir = path.join(baseDir, '.claude', 'skills', bundle.identifier);
+
+        // path → content for SKILL.md plus every resource file.
+        const entries: [string, string][] = [
+          ['SKILL.md', bundle.content],
+          ...Object.entries(bundle.files),
+        ];
+
+        const written: string[] = [];
+        const skipped: string[] = [];
+        for (const [rel, content] of entries) {
+          const dest = path.join(skillDir, rel);
+          if (existsSync(dest) && !options.force) {
+            skipped.push(rel);
+            continue;
+          }
+          mkdirSync(path.dirname(dest), { recursive: true });
+          writeFileSync(dest, content, 'utf8');
+          written.push(rel);
+        }
+
+        const result = { dir: skillDir, skill: bundle.identifier, skipped, written };
+        if (options.json !== undefined) {
+          outputJson(result, typeof options.json === 'string' ? options.json : undefined);
+          return;
+        }
+        console.log(
+          `${pc.green('✓')} ${pc.bold(bundle.name)} skill → ${pc.dim(path.relative(process.cwd(), skillDir) || skillDir)}`,
+        );
+        console.log(
+          `  ${written.length} written${skipped.length ? `, ${skipped.length} skipped` : ''}`,
+        );
+        if (skipped.length > 0)
+          console.log(pc.dim(`  (skipped existing — pass --force to overwrite)`));
+      },
+    );
 
   // ════════════ criteria ════════════
   const criterion = verify.command('criterion').description('Reusable pass/fail standards');
@@ -514,6 +681,27 @@ export function registerVerifyCommand(program: Command) {
       console.log(JSON.stringify(item, null, 2));
     });
 
+  run
+    .command('delete <runId>')
+    .description('Delete a verification session (cascades its results, evidence and report)')
+    .option('-y, --yes', 'Skip the confirmation prompt')
+    .option('--json [fields]', 'Output JSON')
+    .action(async (runId: string, options: { json?: boolean | string; yes?: boolean }) => {
+      const client = await getTrpcClient();
+      if (!options.yes) {
+        const ok = await confirm(
+          `Delete run ${pc.bold(runId)} and all its results, evidence and report? This cannot be undone.`,
+        );
+        if (!ok) return void console.log('Aborted.');
+      }
+      const result = await client.verify.deleteRun.mutate({ verifyRunId: runId });
+      if (options.json !== undefined) {
+        outputJson(result, typeof options.json === 'string' ? options.json : undefined);
+        return;
+      }
+      console.log(`${pc.green('✓')} Deleted run ${pc.bold(result.id)}`);
+    });
+
   // ════════════ result (check result entity) ════════════
   const result = verify.command('result').description('Check results (verify_check_results)');
 
@@ -589,6 +777,93 @@ export function registerVerifyCommand(program: Command) {
       printResults(results);
     });
 
+  // ════════════ submit (builder self-evidence: result + evidence in one call) ════════════
+  verify
+    .command('submit')
+    .description('Submit a check item — upsert its result and attach evidence in one call')
+    .option('--run <verifyRunId>', 'Target verification session (or use --operation)')
+    .option('--operation <operationId>', 'Resolve the session from an Agent Run operation id')
+    .requiredOption('--item <checkItemId>', 'Plan item id (checkItemId)')
+    .option('--type <type>', 'screenshot|gif|video|text|dom_snapshot|transcript')
+    .option('--file <path>', 'Local file to upload as the evidence artifact')
+    .option('--content <text>', 'Inline text payload (instead of a file)')
+    .option('--verdict <verdict>', 'passed|failed|uncertain')
+    .option('--title <text>', 'Check item title snapshot')
+    .option('--by <capturedBy>', 'agent-browser|cdp|cli|program|llm_judge', 'cli')
+    .option('--desc <text>', 'Human-readable caption for the evidence')
+    .option('--json [fields]', 'Output JSON')
+    .action(
+      async (options: {
+        by?: string;
+        content?: string;
+        desc?: string;
+        file?: string;
+        item: string;
+        json?: boolean | string;
+        operation?: string;
+        run?: string;
+        title?: string;
+        type?: string;
+        verdict?: string;
+      }) => {
+        if (!options.run && !options.operation) {
+          log.error('Provide --run <verifyRunId> or --operation <operationId>');
+          process.exit(1);
+        }
+        const hasEvidence = Boolean(options.file) || Boolean(options.content);
+        if (Boolean(options.file) && Boolean(options.content)) {
+          log.error('Provide at most one of --file or --content');
+          process.exit(1);
+        }
+        if (hasEvidence && !options.type) {
+          log.error('--type is required when attaching evidence');
+          process.exit(1);
+        }
+        if (!hasEvidence && !options.verdict) {
+          log.error('Provide evidence (--file/--content) and/or a --verdict');
+          process.exit(1);
+        }
+        const client = await getTrpcClient();
+        let fileId: string | undefined;
+        let inlineContent = options.content;
+        if (options.file) {
+          inlineContent = inlineTextEvidenceForFile(options.file, options.type!);
+          if (inlineContent === undefined) {
+            const uploaded = await uploadLocalFile(client, options.file);
+            fileId = uploaded.id;
+          }
+        }
+        const evidence = hasEvidence
+          ? [
+              {
+                capturedBy: options.by as any,
+                content: inlineContent,
+                description: options.desc,
+                fileId,
+                type: options.type as any,
+              },
+            ]
+          : undefined;
+        const res = await client.verify.submitCheckEvidence.mutate({
+          checkItemId: options.item,
+          checkItemTitle: options.title,
+          evidence,
+          operationId: options.operation,
+          verdict: options.verdict as any,
+          verifyRunId: options.run,
+        });
+        if (options.json !== undefined) {
+          outputJson(res, typeof options.json === 'string' ? options.json : undefined);
+          return;
+        }
+        console.log(
+          `${pc.green('✓')} Submitted ${pc.bold(res.checkResult.id)}` +
+            `${res.checkResult.verdict ? ` (${res.checkResult.verdict})` : ''}` +
+            `${res.evidence.length > 0 ? ` +${res.evidence.length} evidence` : ''}`,
+        );
+      },
+    );
+
   // ════════════ evidence (artifact entity) ════════════
   const evidence = verify.command('evidence').description('Evidence artifacts (verify_evidence)');
 
@@ -618,14 +893,18 @@ export function registerVerifyCommand(program: Command) {
         }
         const client = await getTrpcClient();
         let fileId: string | undefined;
+        let inlineContent = options.content;
         if (options.file) {
-          const uploaded = await uploadLocalFile(client, options.file);
-          fileId = uploaded.id;
+          inlineContent = inlineTextEvidenceForFile(options.file, options.type);
+          if (inlineContent === undefined) {
+            const uploaded = await uploadLocalFile(client, options.file);
+            fileId = uploaded.id;
+          }
         }
         const ev = await client.verify.uploadEvidence.mutate({
           capturedBy: options.by as any,
           checkResultId: options.check,
-          content: options.content,
+          content: inlineContent,
           description: options.desc,
           fileId,
           type: options.type as any,
@@ -662,6 +941,20 @@ export function registerVerifyCommand(program: Command) {
         ]),
         ['ID', 'TYPE', 'BY', 'PAYLOAD', 'DESC'],
       );
+    });
+
+  evidence
+    .command('delete <evidenceId>')
+    .description('Delete an evidence artifact')
+    .option('--json [fields]', 'Output JSON')
+    .action(async (evidenceId: string, options: { json?: boolean | string }) => {
+      const client = await getTrpcClient();
+      const result = await client.verify.deleteEvidence.mutate({ id: evidenceId });
+      if (options.json !== undefined) {
+        outputJson(result, typeof options.json === 'string' ? options.json : undefined);
+        return;
+      }
+      console.log(`${pc.green('✓')} Deleted evidence ${pc.bold(result.id)}`);
     });
 
   // ════════════ report (narrative entity) ════════════
@@ -747,6 +1040,8 @@ export function registerVerifyCommand(program: Command) {
     .option('--operation <id>', 'Link the session to an existing Agent Run')
     .option('--title <title>', 'Override the session title')
     .option('--goal <goal>', 'The goal/task being verified')
+    .option('--run <verifyRunId>', 'Update an existing session in place instead of creating one')
+    .option('--new', 'Force a fresh session even if this report dir already created one')
     .option('--open', 'Print the in-app URL to open the report')
     .option('--json [fields]', 'Output JSON')
     .action(
@@ -755,8 +1050,10 @@ export function registerVerifyCommand(program: Command) {
         options: {
           goal?: string;
           json?: boolean | string;
+          new?: boolean;
           open?: boolean;
           operation?: string;
+          run?: string;
           source?: string;
           title?: string;
         },
@@ -786,11 +1083,13 @@ export function registerVerifyCommand(program: Command) {
         const surfaces = Array.isArray(result.surfaces)
           ? result.surfaces.filter((s: unknown) => typeof s === 'string')
           : undefined;
+        const pullRequest = pullRequestFromResult(result);
         const contextEntries = Object.entries({
           branch: typeof result.branch === 'string' ? result.branch : undefined,
           commit: typeof result.commit === 'string' ? result.commit : undefined,
           entry: typeof result.entry === 'string' ? result.entry : undefined,
           focus: typeof result.focus === 'string' ? result.focus : options.goal,
+          pullRequest,
           surfaces: surfaces && surfaces.length > 0 ? surfaces : undefined,
           testedAt: typeof result.createdAt === 'string' ? result.createdAt : undefined,
         }).filter(([, v]) => v !== undefined);
@@ -801,21 +1100,65 @@ export function registerVerifyCommand(program: Command) {
         const scenario = result.scenario === 'coding' ? 'coding' : ('coding' as const);
 
         const client = await getTrpcClient();
+        const goal = options.goal ?? (typeof result.focus === 'string' ? result.focus : undefined);
+        const title = options.title ?? result.title;
+        const newRunMetadata = metadataForReport(result);
 
-        // 1. Create the verification session.
-        const run = await client.verify.createRun.mutate({
-          context,
-          goal: options.goal ?? (typeof result.focus === 'string' ? result.focus : undefined),
-          operationId: options.operation,
-          scenario,
-          source: options.source as any,
-          title: options.title ?? result.title,
-        });
+        // Resolve the target session. Reuse the one this report dir already
+        // created (recorded in the sidecar) so re-verifying the same case
+        // updates one evolving report in place rather than adding a list entry
+        // per round. `--run` targets a session explicitly; `--new` forces a
+        // fresh one; `--operation` links a fresh session to an Agent Run.
+        const rememberedRunId = options.new ? undefined : (options.run ?? readSidecarRunId(dir));
+        let runId!: string;
+        let reused = false;
+        if (rememberedRunId) {
+          const existing = await client.verify.getRun.query({ verifyRunId: rememberedRunId });
+          if (existing) {
+            reused = true;
+            runId = existing.id;
+            const metadata = metadataForReport(result, existing.metadata);
+            // 1a. Refresh the scope header / title / goal in place.
+            await client.verify.updateRun.mutate({
+              value: { context, goal, metadata, scenario, title },
+              verifyRunId: runId,
+            });
+          } else if (options.run) {
+            // An explicit --run that doesn't resolve is a user error, not a
+            // silent fall-through to a stray new session.
+            log.error(`Verification session not found: ${options.run}`);
+            process.exit(1);
+          } else {
+            // The remembered session was deleted — drop the stale pointer and
+            // create a fresh one below.
+            log.warn(`Recorded session ${rememberedRunId} no longer exists — creating a new one`);
+          }
+        }
 
-        // 2. Ingest each case as a check result + its evidence.
-        let uploaded = 0;
+        // 1b. Create the verification session when not updating one in place.
+        if (!reused) {
+          const run = await client.verify.createRun.mutate({
+            context,
+            goal,
+            metadata: newRunMetadata,
+            operationId: options.operation,
+            scenario,
+            source: options.source as any,
+            title,
+          });
+          runId = run.id;
+        }
+
+        // 2. Ingest each case as a check result + its evidence. `checkItemId` is
+        //    the stable upsert key, so a re-ingest overwrites the matching case
+        //    rather than duplicating it. Track the ids we touch to prune dropped
+        //    cases afterwards, keeping a re-run a full replace.
+        const seenCheckItemIds = new Set<string>();
+        let evidenceCount = 0;
+        let inlined = 0;
         for (const [index, c] of cases.entries()) {
           const checkItemId = String(c.id ?? c.checkItemId ?? `case-${index + 1}`);
+          seenCheckItemIds.add(checkItemId);
           const verdict = toVerdict(c.result ?? c.status ?? c.verdict);
           const observation = c.keyObservation ?? c.observation ?? c.note;
           const checkResult = await client.verify.ingestResult.mutate({
@@ -825,12 +1168,27 @@ export function registerVerifyCommand(program: Command) {
             required: c.required ?? true,
             // The case's key observation is recorded as Toulmin evidence; a real
             // remediation hint (if the report provides one) goes to `suggestion`.
-            suggestion: typeof c.suggestion === 'string' ? c.suggestion : undefined,
-            toulmin: typeof observation === 'string' ? { evidence: observation } : undefined,
+            // Absent → explicit `null`, not `undefined`: ingest-report is a full
+            // replace, so a case that dropped its observation/suggestion this
+            // round must CLEAR the prior value on a reused run (undefined would be
+            // skipped by the conflict UPDATE and leave stale text on the row).
+            suggestion: typeof c.suggestion === 'string' ? c.suggestion : null,
+            toulmin: typeof observation === 'string' ? { evidence: observation } : null,
             verdict,
             verifierType: 'agent',
-            verifyRunId: run.id,
+            verifyRunId: runId,
           });
+
+          // On an in-place update, clear the case's prior evidence before
+          // re-attaching so screenshots are replaced, not stacked round on round.
+          if (reused) {
+            const prior = await client.verify.listEvidence.query({
+              checkResultId: checkResult.id,
+            });
+            for (const ev of prior) {
+              await client.verify.deleteEvidence.mutate({ id: ev.id });
+            }
+          }
 
           for (const rel of evidencePaths(c.evidence)) {
             const abs = path.isAbsolute(rel) ? rel : path.join(dir, rel);
@@ -839,17 +1197,21 @@ export function registerVerifyCommand(program: Command) {
               continue;
             }
             try {
-              const file = await uploadLocalFile(client, abs);
+              const type = evidenceTypeForFile(abs);
+              const content = inlineTextEvidenceForFile(abs, type);
+              const file = content === undefined ? await uploadLocalFile(client, abs) : undefined;
               await client.verify.uploadEvidence.mutate({
                 capturedBy: 'cli',
                 checkResultId: checkResult.id,
                 // The filename, not the case title — the title already heads the
                 // check card, so reusing it here just triples the same text.
+                content,
                 description: path.basename(abs),
-                fileId: file.id,
-                type: evidenceTypeForFile(abs),
+                fileId: file?.id,
+                type,
               });
-              uploaded += 1;
+              evidenceCount += 1;
+              if (content !== undefined) inlined += 1;
             } catch (e) {
               // A stub/unreachable storage bucket (common in local dev) fails the
               // file PUT — don't abort the whole ingest over one artifact; the
@@ -882,23 +1244,55 @@ export function registerVerifyCommand(program: Command) {
           totalChecks: summary.total ?? cases.length,
           uncertainChecks: (summary.blocked ?? 0) + (summary.uncertain ?? 0) || undefined,
           verdict: summary.verdict ? toVerdict(summary.verdict) : undefined,
-          verifyRunId: run.id,
+          verifyRunId: runId,
         });
+
+        // 4. Prune cases the report no longer has (only when updating in place —
+        //    a fresh session has nothing to prune). Keeps a re-run a full
+        //    replace: dropped checks and their evidence disappear.
+        let pruned = 0;
+        if (reused) {
+          const existingResults = await client.verify.listResultsByRun.query({
+            verifyRunId: runId,
+          });
+          for (const r of existingResults) {
+            if (!seenCheckItemIds.has(r.checkItemId)) {
+              await client.verify.deleteResult.mutate({ id: r.id });
+              pruned += 1;
+            }
+          }
+        }
+
+        // 5. Remember this session on the report dir so the next ingest of the
+        //    same dir updates it in place instead of creating a new one.
+        writeSidecarRunId(dir, runId);
 
         if (options.json !== undefined) {
           outputJson(
-            { cases: cases.length, evidence: uploaded, verifyRunId: run.id },
+            {
+              cases: cases.length,
+              evidence: evidenceCount,
+              inlined,
+              pruned,
+              reused,
+              verifyRunId: runId,
+            },
             typeof options.json === 'string' ? options.json : undefined,
           );
           return;
         }
 
+        const verb = reused ? 'Updated' : 'Ingested';
         console.log(
-          `${pc.green('✓')} Ingested ${pc.bold(String(cases.length))} case(s), ${pc.bold(String(uploaded))} evidence file(s)`,
+          `${pc.green('✓')} ${verb} ${pc.bold(String(cases.length))} case(s), ${pc.bold(String(evidenceCount))} evidence artifact(s)` +
+            `${inlined > 0 ? `, ${pc.bold(String(inlined))} inline` : ''}` +
+            `${pruned > 0 ? `, pruned ${pc.bold(String(pruned))} stale case(s)` : ''}`,
         );
-        console.log(`${pc.bold('verifyRunId')}: ${run.id}`);
+        console.log(
+          `${pc.bold('verifyRunId')}: ${runId}${reused ? pc.dim(' (updated in place)') : ''}`,
+        );
         if (options.open) {
-          console.log(`${pc.bold('open')}: /verify/${run.id}`);
+          console.log(`${pc.bold('open')}: /verify/${runId}`);
         }
       },
     );

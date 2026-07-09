@@ -41,12 +41,15 @@ import type {
   HeterogeneousAgentEvent,
   HeterogeneousRateLimitInfo,
   HeterogeneousTerminalErrorData,
+  HeterogeneousToolResultImage,
   StreamChunkData,
   SubagentEventContext,
+  SubagentSpawnMetadata,
   ToolCallPayload,
   ToolResultData,
   UsageData,
 } from '../types';
+import { imagePlaceholder } from '../imageEcho';
 
 /**
  * The CC tool_use `name` we synthesize `pluginState.todos` for. Inlined here
@@ -555,13 +558,41 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
    */
   private mainToolInputsById = new Map<string, Record<string, any>>();
   /**
+   * `tool_use.id → ToolCallPayload`, so `tool_end` can re-attach the same
+   * `{ toolCalling }` payload the server ships — aligning the hetero event
+   * stream with the gateway/server one so renderer `onAfterCall` hooks fire
+   * identically regardless of runtime.
+   */
+  private toolPayloadById = new Map<string, ToolCallPayload>();
+  /**
    * Set of parent tool_use ids whose spawn metadata has already been
    * announced on a subagent event. Guarantees `spawnMetadata` appears
-   * exactly once per subagent run — on the first subagent chunk for that
+   * exactly once per subagent run — on the first subagent event for that
    * parent — so the executor's lazy-create logic isn't tempted to
    * recreate the Thread on every chunk.
    */
   private announcedSpawns = new Set<string>();
+
+  /**
+   * Build the spawn metadata (`description` / `prompt` / `subagent_type`) for a
+   * subagent's parent tool_use from the cached Task/Agent input. Pure: it neither
+   * reads nor mutates {@link announcedSpawns} — the caller gates "exactly once"
+   * and only marks the parent announced when the metadata is actually attached to
+   * an EMITTED chunk (see `handleSubagentAssistant`). Returns undefined when the
+   * parent's args were never cached.
+   */
+  private buildSpawnMetadata(parentToolCallId: string): SubagentSpawnMetadata | undefined {
+    const args = this.mainToolInputsById.get(parentToolCallId);
+    if (!args) return undefined;
+    // CC's subagent-spawn tools (Task, Agent, ...) share the same input shape
+    // (`description`, `prompt`, `subagent_type`). Pull the fields defensively —
+    // any unknown spawn-tool variant matching this shape benefits automatically.
+    return {
+      description: typeof args.description === 'string' ? args.description : undefined,
+      prompt: typeof args.prompt === 'string' ? args.prompt : undefined,
+      subagentType: typeof args.subagent_type === 'string' ? args.subagent_type : undefined,
+    };
+  }
   /**
    * Tool name keyed by main-agent `tool_use.id`. Used to label the
    * resulting {@link ExternalSignalContext} when a Monitor-style task
@@ -652,9 +683,12 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
   }
 
   flush(): HeterogeneousAgentEvent[] {
-    // Close any still-open tools (shouldn't happen in normal flow, but be safe)
+    // A still-pending tool never produced a result (the CLI ended / was cancelled
+    // mid-tool), so mark it UNSUCCESSFUL — mirrors Codex's drain and stops a
+    // side-effect hook (e.g. worktree detection) from treating an unfinished
+    // `git worktree add` as a success.
     const events = [...this.pendingToolCalls].map((id) =>
-      this.makeEvent('tool_end', { isSuccess: true, toolCallId: id }),
+      this.makeEvent('tool_end', this.buildToolEndData(id, false)),
     );
     this.pendingToolCalls.clear();
     return events;
@@ -716,6 +750,9 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
       this.makeEvent('stream_start', {
         model: raw.model,
         provider: 'claude-code',
+        // The CC session id every message this run produces belongs to. A
+        // change in this value across a topic means CC forked a new session.
+        sessionId: this.sessionId,
       }),
     ];
   }
@@ -789,14 +826,19 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
           // domain-named) instead of the wire-prefixed MCP form. Identifier
           // stays `claude-code` because this remains a CC-side tool.
           const apiName = block.name === ASK_USER_MCP_TOOL_NAME ? ASK_USER_API_NAME : block.name;
-          newToolCalls.push({
+          const toolPayload: ToolCallPayload = {
             apiName,
             arguments: JSON.stringify(block.input || {}),
             id: block.id,
             identifier: 'claude-code',
             type: 'default',
-          });
+          };
+          newToolCalls.push(toolPayload);
           this.pendingToolCalls.add(block.id);
+          // Cache the payload by id so `tool_end` can carry the same
+          // `{ toolCalling }` the server emits — keeps the event stream aligned
+          // so renderer `onAfterCall` hooks fire identically across runtimes.
+          this.toolPayloadById.set(block.id, toolPayload);
           // Cache EVERY main-agent tool_use input so the subagent-spawn
           // handler (`emitToolChunk`) can look up the parent's args on
           // first subagent event regardless of which spawn-tool name CC
@@ -943,9 +985,32 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
     if (!Array.isArray(content)) return [];
 
     const messageId: string | undefined = raw.message?.id;
-    const subagentCtx = {
+    const baseCtx: SubagentEventContext = {
       parentToolCallId: parentToolUseId,
       subagentMessageId: messageId ?? '',
+    };
+
+    // Build spawn metadata once per parent and hand it to the FIRST chunk this
+    // event emits (reasoning, text, OR tool). The executor lazy-creates +
+    // titles the Thread off whichever subagent event it sees first, so a
+    // reasoning/text-first subagent must carry the metadata too — not just the
+    // tool path — or the Thread is born with the generic "Subagent" title.
+    //
+    // `announcedSpawns` is marked only when the metadata is ACTUALLY attached to
+    // an emitted chunk (inside `nextSubagentCtx`), not merely built here. A first
+    // event that emits nothing the reducer consumes (empty text/thinking block,
+    // an unsupported block, or a usage-only `content: []`) must NOT burn the
+    // one-shot — otherwise the next real chunk would create the Thread with the
+    // fallback title, the exact bug this guards against.
+    let pendingSpawnMetadata = this.announcedSpawns.has(parentToolUseId)
+      ? undefined
+      : this.buildSpawnMetadata(parentToolUseId);
+    const nextSubagentCtx = (): SubagentEventContext => {
+      if (!pendingSpawnMetadata) return baseCtx;
+      const ctx: SubagentEventContext = { ...baseCtx, spawnMetadata: pendingSpawnMetadata };
+      pendingSpawnMetadata = undefined;
+      this.announcedSpawns.add(parentToolUseId);
+      return ctx;
     };
 
     const textParts: string[] = [];
@@ -967,14 +1032,19 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
           // domain-named) instead of the wire-prefixed MCP form. Identifier
           // stays `claude-code` because this remains a CC-side tool.
           const apiName = block.name === ASK_USER_MCP_TOOL_NAME ? ASK_USER_API_NAME : block.name;
-          newToolCalls.push({
+          const toolPayload: ToolCallPayload = {
             apiName,
             arguments: JSON.stringify(block.input || {}),
             id: block.id,
             identifier: 'claude-code',
             type: 'default',
-          });
+          };
+          newToolCalls.push(toolPayload);
           this.pendingToolCalls.add(block.id);
+          // Cache the payload by id so `tool_end` can carry the same
+          // `{ toolCalling }` the server emits — keeps the event stream aligned
+          // so renderer `onAfterCall` hooks fire identically across runtimes.
+          this.toolPayloadById.set(block.id, toolPayload);
           if (block.name === CC_TODO_WRITE_TOOL_NAME && block.input) {
             this.todoWriteInputs.set(block.id, block.input as TodoWriteArgs);
           }
@@ -995,7 +1065,7 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
         this.makeChunkEvent({
           chunkType: 'reasoning',
           reasoning: reasoningParts.join(''),
-          subagent: subagentCtx,
+          subagent: nextSubagentCtx(),
         }),
       );
     }
@@ -1004,11 +1074,19 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
         this.makeChunkEvent({
           chunkType: 'text',
           content: textParts.join(''),
-          subagent: subagentCtx,
+          subagent: nextSubagentCtx(),
         }),
       );
     }
-    events.push(...this.emitToolChunk(newToolCalls, messageId, subagentCtx));
+    // Only consume the pending spawn metadata for the tool chunk when this
+    // event actually carries tools (else it would be lost on the no-op chunk).
+    events.push(
+      ...this.emitToolChunk(
+        newToolCalls,
+        messageId,
+        newToolCalls.length > 0 ? nextSubagentCtx() : baseCtx,
+      ),
+    );
 
     const usage = toUsageData(raw.message?.usage);
     if (usage) {
@@ -1017,7 +1095,7 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
           model: raw.message?.model,
           phase: 'turn_metadata',
           provider: 'claude-code',
-          subagent: subagentCtx,
+          subagent: baseCtx,
           usage,
         }),
       );
@@ -1038,15 +1116,14 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
    * so an echoed tool_use does not re-open a closed lifecycle.
    *
    * When `subagentCtx` is provided, the chunk + each tool_start event
-   * gets the context stamped as a peer field. The FIRST chunk for a new
-   * parent (tracked via `announcedSpawns`) also carries `spawnMetadata`
-   * built from the cached Task args, so the executor can lazy-create
-   * the Thread without knowing about CC-specific argument shapes.
+   * gets the context stamped as a peer field — including any `spawnMetadata`
+   * the caller already attached (`handleSubagentAssistant` builds it once per
+   * parent and hands it to the first emitted chunk, tool or otherwise).
    */
   private emitToolChunk(
     newToolCalls: ToolCallPayload[],
     messageId: string | undefined,
-    subagentCtx?: { parentToolCallId: string; subagentMessageId: string },
+    subagentCtx?: SubagentEventContext,
   ): HeterogeneousAgentEvent[] {
     if (newToolCalls.length === 0) return [];
 
@@ -1057,30 +1134,10 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
     const cumulative = [...existing, ...freshTools];
     this.toolCallsByMessageId.set(msgKey, cumulative);
 
-    // Build the `subagent` peer field — stamped on the chunk + each
-    // tool_start. Only the first emission for a new parent carries
-    // spawnMetadata; subsequent ones carry just the lineage ids.
-    const subagent: SubagentEventContext | undefined = subagentCtx
-      ? {
-          parentToolCallId: subagentCtx.parentToolCallId,
-          subagentMessageId: subagentCtx.subagentMessageId,
-        }
-      : undefined;
-    if (subagent && !this.announcedSpawns.has(subagent.parentToolCallId)) {
-      const args = this.mainToolInputsById.get(subagent.parentToolCallId);
-      if (args) {
-        // CC's subagent-spawn tools (Task, Agent, ...) share the same
-        // input shape (`description`, `prompt`, `subagent_type`). We pull
-        // the fields defensively — any unknown spawn-tool variant that
-        // happens to match this shape benefits automatically.
-        subagent.spawnMetadata = {
-          description: typeof args.description === 'string' ? args.description : undefined,
-          prompt: typeof args.prompt === 'string' ? args.prompt : undefined,
-          subagentType: typeof args.subagent_type === 'string' ? args.subagent_type : undefined,
-        };
-      }
-      this.announcedSpawns.add(subagent.parentToolCallId);
-    }
+    // The `subagent` peer field — stamped on the chunk + each tool_start —
+    // is passed through verbatim (carrying `spawnMetadata` when the caller
+    // designated this the first emission for the parent).
+    const subagent: SubagentEventContext | undefined = subagentCtx;
 
     const chunkData: StreamChunkData = {
       chunkType: 'tools_calling',
@@ -1095,6 +1152,33 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
       events.push(this.makeEvent('tool_start', startData));
     }
     return events;
+  }
+
+  /**
+   * Build `tool_end` event data aligned with the server/gateway shape: alongside
+   * `{ isSuccess, toolCallId }`, re-attach the tool's `{ toolCalling }` payload
+   * (from `toolPayloadById`) and a `result` mirroring a `BuiltinToolResult`. This
+   * is what lets the renderer's `onAfterCall` dispatch resolve the executor (by
+   * `identifier`) and observe the result — otherwise hetero tool_end carried no
+   * payload/result and `onAfterCall` was a silent no-op for CLI runs.
+   */
+  private buildToolEndData(
+    toolCallId: string,
+    isSuccess: boolean,
+    opts?: { content?: string; state?: unknown; subagent?: SubagentEventContext },
+  ): Record<string, any> {
+    const data: Record<string, any> = { isSuccess, toolCallId };
+    if (opts?.subagent) data.subagent = opts.subagent;
+
+    const toolCalling = this.toolPayloadById.get(toolCallId);
+    if (toolCalling) data.payload = { toolCalling };
+
+    data.result = {
+      content: opts?.content ?? '',
+      success: isSuccess,
+      ...(opts?.state ? { state: opts.state } : {}),
+    };
+    return data;
   }
 
   /**
@@ -1132,6 +1216,11 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
         this.hasUnhandledUserInput = true;
       }
 
+      // `Read` on images yields `{type: 'image', source: {...}}` blocks. We
+      // gather their base64 bodies here (in the SAME pass that builds the
+      // human-readable content) so the runtime pipeline can upload them and the
+      // UI can echo a thumbnail — see `pluginState.images` below.
+      const images: HeterogeneousToolResultImage[] = [];
       const resultContent =
         typeof block.content === 'string'
           ? block.content
@@ -1145,12 +1234,15 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
                   // the UI's StatusIndicator stuck on the spinner ().
                   if (c?.type === 'tool_reference' && c.tool_name) return c.tool_name;
                   // `Read` on images yields `{type: 'image', source: {...}}` blocks
-                  // with no text. Drop a minimal placeholder so the tool message
-                  // has non-empty content (); richer image echo is a
-                  // follow-up that needs structured ToolResultData.
+                  // with no text. Keep the `[Image: …]` placeholder as the
+                  // content fallback () and preserve the base64 body on
+                  // `pluginState.images` for rich echo ().
                   if (c?.type === 'image') {
                     const mediaType = c.source?.media_type || 'image';
-                    return `[Image: ${mediaType}]`;
+                    if (c.source?.type === 'base64' && typeof c.source.data === 'string') {
+                      images.push({ data: c.source.data, mediaType });
+                    }
+                    return imagePlaceholder(mediaType);
                   }
                   return c.text || c.content || '';
                 })
@@ -1187,7 +1279,14 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
           ? this.applyTaskToolResult(toolCallId, !!block.is_error, resultContent)
           : undefined;
 
-      const pluginState = todoWritePluginState ?? taskPluginState;
+      // Images are mutually exclusive with Todo/Task results in practice (a
+      // `Read` is neither), but merge defensively so a future producer that
+      // carries both doesn't clobber one. `data` is still raw base64 here; the
+      // runtime pipeline uploads and rewrites these entries before persistence.
+      let pluginState: Record<string, any> | undefined = todoWritePluginState ?? taskPluginState;
+      if (images.length > 0) {
+        pluginState = { ...pluginState, images };
+      }
 
       // Emit tool_result for executor to persist content to tool message
       events.push(
@@ -1204,11 +1303,14 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
       if (this.pendingToolCalls.has(toolCallId)) {
         this.pendingToolCalls.delete(toolCallId);
         events.push(
-          this.makeEvent('tool_end', {
-            isSuccess: !block.is_error,
-            subagent: subagentCtx,
-            toolCallId,
-          }),
+          this.makeEvent(
+            'tool_end',
+            this.buildToolEndData(toolCallId, !block.is_error, {
+              content: resultContent,
+              state: pluginState,
+              subagent: subagentCtx,
+            }),
+          ),
         );
       }
     }
@@ -1351,7 +1453,12 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
     // wrongly inherit the previous run's task-completion tag).
     this.pendingTaskCompletion = undefined;
 
-    return [...events, this.makeEvent('stream_end', {}), finalEvent];
+    return [
+      ...events,
+      this.makeEvent('stream_end', {}),
+      this.makeEvent('visible_output_end', {}),
+      finalEvent,
+    ];
   }
 
   /**
@@ -1451,7 +1558,13 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
       this.started = true;
       this.currentMessageId = messageId;
       this.currentTurnHadToolUse = false;
-      return [this.makeEvent('stream_start', { model, provider: 'claude-code' })];
+      return [
+        this.makeEvent('stream_start', {
+          model,
+          provider: 'claude-code',
+          sessionId: this.sessionId,
+        }),
+      ];
     }
 
     if (messageId === this.currentMessageId) {
@@ -1487,15 +1600,28 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
           model,
           newStep: true,
           provider: 'claude-code',
+          sessionId: this.sessionId,
         }),
       ];
     }
 
     if (this.currentMessageId === undefined) {
       // First assistant/delta after system init — record without step boundary.
+      // Emit a non-newStep stream_start carrying this turn's CC message.id so
+      // the reducer records `currentMainMessageId` for the SEEDED assistant.
+      // system:init opened the seed with no id, so without this the first turn's
+      // rows (assistant / tools / usage) would carry no `heteroMessageId` — the
+      // exact first turn of a resumed/forked operation this provenance targets.
       this.currentMessageId = messageId;
       this.currentTurnHadToolUse = false;
-      return [];
+      return [
+        this.makeEvent('stream_start', {
+          messageId,
+          model,
+          provider: 'claude-code',
+          sessionId: this.sessionId,
+        }),
+      ];
     }
 
     this.currentMessageId = messageId;
@@ -1551,6 +1677,7 @@ export class ClaudeCodeAdapter implements AgentEventAdapter {
         model,
         newStep: true,
         provider: 'claude-code',
+        sessionId: this.sessionId,
       }),
     ];
   }

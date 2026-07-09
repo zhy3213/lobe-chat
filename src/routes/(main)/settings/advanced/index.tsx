@@ -10,6 +10,7 @@ import { Loader2Icon } from 'lucide-react';
 import { memo, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import AsyncError from '@/components/AsyncError';
 import { FORM_STYLE } from '@/const/layoutTokens';
 import SettingHeader from '@/routes/(main)/settings/features/SettingHeader';
 import { autoUpdateService } from '@/services/electron/autoUpdate';
@@ -35,11 +36,14 @@ const Page = memo(() => {
   const defaultAgentGatewayModeEnabled = useUserStore(
     (s) => settingsSelectors.defaultAgentConfig(s).chatConfig?.disableGatewayMode !== true,
   );
-  const [setSettings, updateDefaultAgent, isUserStateInit] = useUserStore((s) => [
-    s.setSettings,
-    s.updateDefaultAgent,
-    s.isUserStateInit,
-  ]);
+  const [setSettings, updateDefaultAgent, isUserStateInit, isUserStateInitError, refreshUserState] =
+    useUserStore((s) => [
+      s.setSettings,
+      s.updateDefaultAgent,
+      s.isUserStateInit,
+      s.isUserStateInitError,
+      s.refreshUserState,
+    ]);
   const [loading, setLoading] = useState(false);
 
   const [
@@ -49,7 +53,8 @@ const Page = memo(() => {
     enablePlatformAgent,
     enableImessage,
     enableFleet,
-    enableTaskVerify,
+    enableFoldFinishedTurn,
+    enableMessageTextSelectionActions,
     updateLab,
   ] = useUserStore((s) => [
     preferenceSelectors.isPreferenceInit(s),
@@ -58,7 +63,8 @@ const Page = memo(() => {
     labPreferSelectors.enablePlatformAgent(s),
     labPreferSelectors.enableImessage(s),
     labPreferSelectors.enableFleet(s),
-    labPreferSelectors.enableTaskVerify(s),
+    labPreferSelectors.enableFoldFinishedTurn(s),
+    labPreferSelectors.enableMessageTextSelectionActions(s),
     s.updateLab,
   ]);
 
@@ -89,7 +95,19 @@ const Page = memo(() => {
     [updateDefaultAgent],
   );
 
-  if (!isUserStateInit) return <Skeleton active paragraph={{ rows: 5 }} title={false} />;
+  if (!isUserStateInit) {
+    // A failed user-state init must show error + Retry, not a permanent skeleton
+    //
+    if (isUserStateInitError)
+      return (
+        <AsyncError
+          error={isUserStateInitError}
+          variant={'block'}
+          onRetry={() => refreshUserState()}
+        />
+      );
+    return <Skeleton active paragraph={{ rows: 5 }} title={false} />;
+  }
 
   const advancedGroup: FormGroupItemType = {
     children: [
@@ -170,14 +188,27 @@ const Page = memo(() => {
     {
       children: (
         <Switch
-          checked={enableTaskVerify}
+          checked={enableFoldFinishedTurn}
           loading={!isPreferenceInit}
-          onChange={(checked) => updateLab({ enableTaskVerify: checked })}
+          onChange={(checked) => updateLab({ enableFoldFinishedTurn: checked })}
         />
       ),
       className: styles.labItem,
-      desc: tLabs('features.taskVerify.desc'),
-      label: tLabs('features.taskVerify.title'),
+      desc: tLabs('features.foldFinishedTurn.desc'),
+      label: tLabs('features.foldFinishedTurn.title'),
+      minWidth: undefined,
+    },
+    {
+      children: (
+        <Switch
+          checked={enableMessageTextSelectionActions}
+          loading={!isPreferenceInit}
+          onChange={(checked) => updateLab({ enableMessageTextSelectionActions: checked })}
+        />
+      ),
+      className: styles.labItem,
+      desc: tLabs('features.messageTextSelectionActions.desc'),
+      label: tLabs('features.messageTextSelectionActions.title'),
       minWidth: undefined,
     },
     ...(isDesktop
