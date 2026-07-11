@@ -63,46 +63,29 @@ jobs:
           fi
 
           if ! git merge --no-edit "$upstream_sha"; then
-            conflicts="$(git diff --name-only --diff-filter=U)"
+            echo "Merge conflicts detected; preferring upstream for application files."
 
-            if [ "$conflicts" = ".github/workflows/sync.yml" ]; then
-              echo "Only .github/workflows/sync.yml conflicted; keeping fork deployment workflow."
-              git checkout --ours .github/workflows/sync.yml
-              git add .github/workflows/sync.yml
-              git commit --no-edit
-            else
+            while IFS= read -r -d '' conflict_path; do
+              if [ "$conflict_path" = ".github/workflows/sync.yml" ]; then
+                echo "Keeping fork workflow: $conflict_path"
+                git checkout --ours -- "$conflict_path"
+              elif git cat-file -e "${upstream_sha}:${conflict_path}" 2>/dev/null; then
+                echo "Taking upstream version: $conflict_path"
+                git checkout "$upstream_sha" -- "$conflict_path"
+              else
+                echo "Following upstream deletion: $conflict_path"
+                git rm -- "$conflict_path"
+              fi
+            done < <(git diff --name-only -z --diff-filter=U)
+
+            if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+              echo "::error::Unresolved merge conflicts remain after applying the upstream-wins policy."
               git status --short
-
-              {
-                echo "### Automatic upstream sync failed"
-                echo
-                echo "Automatic upstream sync failed while merging \`lobehub/lobe-chat:canary\` into \`next\`."
-                echo
-                echo "- Target before sync: \`${before_sha}\`"
-                echo "- Upstream canary: \`${upstream_sha}\`"
-                echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-                echo
-                echo "Resolve locally with:"
-                echo
-                echo '```bash'
-                echo "git fetch origin next"
-                echo "git fetch https://github.com/lobehub/lobe-chat.git canary"
-                echo "git checkout next"
-                echo "git reset --hard origin/next"
-                echo "git merge FETCH_HEAD"
-                echo "# resolve conflicts"
-                echo "git push origin next"
-                echo '```'
-              } >> "$GITHUB_STEP_SUMMARY"
-
-              echo "Automatic upstream sync failed while merging \`lobehub/lobe-chat:canary\` into \`next\`."
-              echo
-              echo "- Target before sync: \`${before_sha}\`"
-              echo "- Upstream canary: \`${upstream_sha}\`"
-              echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
               exit 1
             fi
+
+            git add -A
+            git commit --no-edit
           fi
 
           after_sha="$(git rev-parse HEAD)"
