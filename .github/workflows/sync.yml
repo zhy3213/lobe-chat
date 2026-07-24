@@ -88,6 +88,22 @@ jobs:
             git commit --no-edit
           fi
 
+          echo "Preserving fork-owned GitHub workflows."
+          while IFS= read -r -d '' workflow_path; do
+            if git cat-file -e "${before_sha}:${workflow_path}" 2>/dev/null; then
+              echo "Keeping fork workflow: $workflow_path"
+              git checkout "$before_sha" -- "$workflow_path"
+            else
+              echo "Dropping upstream-added workflow: $workflow_path"
+              git rm -- "$workflow_path"
+            fi
+          done < <(git diff --name-only -z "$before_sha" HEAD -- .github/workflows)
+
+          git add -A .github/workflows
+          if ! git diff --cached --quiet; then
+            git commit --amend --no-edit
+          fi
+
           after_sha="$(git rev-parse HEAD)"
           git push origin HEAD:next
 
