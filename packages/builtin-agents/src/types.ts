@@ -11,6 +11,7 @@ export const BUILTIN_AGENT_SLUGS = {
   groupSupervisor: 'group-supervisor',
   inbox: 'inbox',
   nightlyReview: 'nightly-review',
+  onboardingUnderstanding: 'onboarding-understanding',
   pageAgent: 'page-agent',
   selfFeedbackIntent: 'self-feedback-intent',
   selfReflection: 'self-reflection',
@@ -83,8 +84,7 @@ export interface RuntimeContext {
  * - Object: BuiltinAgentRuntimeResult (static config)
  */
 export type BuiltinAgentRuntimeConfig =
-  | ((ctx: RuntimeContext) => BuiltinAgentRuntimeResult)
-  | BuiltinAgentRuntimeResult;
+  ((ctx: RuntimeContext) => BuiltinAgentRuntimeResult) | BuiltinAgentRuntimeResult;
 
 /**
  * Builtin Agent Definition - complete definition with persist and runtime parts
