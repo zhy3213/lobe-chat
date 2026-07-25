@@ -715,6 +715,11 @@ export const chatToolKeys = {
 // header is `portal:` not `document:`.
 // =========================================================================
 
+// ---- api key (settings/apikey) -------------------------------------------
+export const apiKeyKeys = {
+  list: def('apiKey:list', () => ['apiKey:list']),
+};
+
 // ---- stats (settings/stats + user header counts) ------------------------
 export const statsKeys = {
   agentUsageStat: def(
@@ -814,13 +819,19 @@ export const verifyKeys = {
 export const inboxKeys = {
   notifications: def(
     'inbox:notifications',
-    (cursor: string | undefined, unreadOnly: boolean | undefined) => [
+    // Keyed by context: the server scopes the inbox to the active workspace
+    // (null = personal), so cached pages must never be reused across contexts.
+    (workspaceId: string | null, cursor: string | undefined, unreadOnly: boolean | undefined) => [
       'inbox:notifications',
+      workspaceId,
       cursor,
       unreadOnly,
     ],
   ),
-  unreadCount: def('inbox:unreadCount', () => ['inbox:unreadCount']),
+  unreadCount: def('inbox:unreadCount', (workspaceId: string | null) => [
+    'inbox:unreadCount',
+    workspaceId,
+  ]),
 };
 
 // ---- share (shared topic / page) ----------------------------------------
