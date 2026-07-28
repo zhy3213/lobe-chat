@@ -12,6 +12,7 @@ import {
   createSharedRolldownOutput,
   sharedModulePreload,
   sharedOptimizeDeps,
+  sharedPwaGlobIgnores,
   sharedRendererDefine,
   sharedRendererPlugins,
 } from './plugins/vite/sharedRendererConfig';
@@ -268,6 +269,7 @@ export default defineConfig({
         manifest: false,
         registerType: 'prompt',
         workbox: {
+          globIgnores: sharedPwaGlobIgnores,
           globPatterns: ['**/*.{js,css,html,woff2}'],
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
           runtimeCaching: [
