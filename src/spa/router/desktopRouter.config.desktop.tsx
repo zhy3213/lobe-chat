@@ -28,7 +28,8 @@ import {
 } from '@/features/Verify/routeMeta';
 import { workspaceHomeRouteMeta } from '@/features/Workspace/routeMeta';
 import DesktopOnboarding from '@/routes/(desktop)/desktop-onboarding';
-// Layouts — sync import (Electron local, no network overhead)
+// Layouts — sync import (Electron local, no network overhead).
+// Unlike the web router, Electron intentionally does not register idle preload groups.
 import DesktopMainLayout from '@/routes/(main)/_layout';
 import ImagePage from '@/routes/(main)/(create)/image';
 import DesktopImageLayout from '@/routes/(main)/(create)/image/_layout';
@@ -54,7 +55,7 @@ import WorkspaceSlugSettingsPlansPage from '@/routes/(main)/[workspaceSlug]/sett
 import WorkspaceSlugSettingsProviderPage from '@/routes/(main)/[workspaceSlug]/settings/provider';
 import WorkspaceSlugSettingsServiceModelPage from '@/routes/(main)/[workspaceSlug]/settings/service-model';
 import WorkspaceSlugSettingsSkillPage from '@/routes/(main)/[workspaceSlug]/settings/skill';
-import WorkspaceSlugSettingsStatsPage from '@/routes/(main)/[workspaceSlug]/settings/stats';
+import WorkspaceSlugSettingsStatisticsPage from '@/routes/(main)/[workspaceSlug]/settings/statistics';
 import WorkspaceSlugSettingsStoragePage from '@/routes/(main)/[workspaceSlug]/settings/storage';
 import WorkspaceSlugSettingsUsagePage from '@/routes/(main)/[workspaceSlug]/settings/usage';
 import AcceptanceWorkspace from '@/routes/(main)/acceptance';
@@ -737,7 +738,9 @@ export const createMainAreaChildren = (): RouteObject[] => [
               { element: <WorkspaceSlugSettingsGeneralPage />, path: 'general' },
               { element: <WorkspaceSlugSettingsMembersPage />, path: 'members' },
               { element: <WorkspaceSlugSettingsNotificationPage />, path: 'notification' },
-              { element: <WorkspaceSlugSettingsStatsPage />, path: 'stats' },
+              { element: <WorkspaceSlugSettingsStatisticsPage />, path: 'statistics' },
+              // Legacy `/:slug/settings/stats` URLs — kept for deep-links.
+              { element: redirectElement('../statistics'), path: 'stats' },
               { element: <WorkspaceSlugSettingsPlansPage />, path: 'plans' },
               { element: <WorkspaceSlugSettingsBillingPage />, path: 'billing' },
               { element: <WorkspaceSlugSettingsCreditsPage />, path: 'credits' },
