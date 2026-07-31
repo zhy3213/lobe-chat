@@ -43,6 +43,7 @@ import WorkspaceSlugSettingsLayout from '@/routes/(main)/[workspaceSlug]/setting
 import WorkspaceSlugSettingsApiKeyPage from '@/routes/(main)/[workspaceSlug]/settings/apikey';
 import WorkspaceSlugSettingsAuditLogPage from '@/routes/(main)/[workspaceSlug]/settings/audit-log';
 import WorkspaceSlugSettingsBillingPage from '@/routes/(main)/[workspaceSlug]/settings/billing';
+import WorkspaceSlugSettingsBudgetPage from '@/routes/(main)/[workspaceSlug]/settings/budget';
 import WorkspaceSlugSettingsConnectorPage from '@/routes/(main)/[workspaceSlug]/settings/connector';
 import WorkspaceSlugSettingsCredentialPage from '@/routes/(main)/[workspaceSlug]/settings/credential';
 import WorkspaceSlugSettingsCreditsPage from '@/routes/(main)/[workspaceSlug]/settings/credits';
@@ -71,11 +72,13 @@ import AgentDocumentLayout from '@/routes/(main)/agent/docs/_layout';
 import AgentDocumentRoute from '@/routes/(main)/agent/docs/[docId]';
 import {
   agentChannelRouteMeta,
+  agentPermissionRouteMeta,
   agentProfileRouteMeta,
   agentRouteMeta,
   agentStatisticsRouteMeta,
   topicsRouteMeta,
 } from '@/routes/(main)/agent/features/routeMeta';
+import AgentPermissionPage from '@/routes/(main)/agent/permission';
 import AgentProfilePage from '@/routes/(main)/agent/profile';
 import AgentStatisticsPage from '@/routes/(main)/agent/statistics';
 import AgentTaskDetailRoute from '@/routes/(main)/agent/task/[taskId]';
@@ -228,6 +231,11 @@ export const sharedMainAreaChildren: RouteObject[] = [
           },
           // Legacy `/agent/:aid/stats` URLs — kept for deep-links.
           { element: redirectElement('../statistics'), path: 'stats' },
+          {
+            element: <AgentPermissionPage />,
+            handle: { meta: agentPermissionRouteMeta },
+            path: 'permission',
+          },
           {
             element: <AgentScopedTasksRoute />,
             handle: { meta: tasksRouteMeta },
@@ -756,6 +764,7 @@ export const createMainAreaChildren = (): RouteObject[] => [
               { element: redirectElement('../statistics'), path: 'stats' },
               { element: <WorkspaceSlugSettingsPlansPage />, path: 'plans' },
               { element: <WorkspaceSlugSettingsBillingPage />, path: 'billing' },
+              { element: <WorkspaceSlugSettingsBudgetPage />, path: 'budget' },
               { element: <WorkspaceSlugSettingsCreditsPage />, path: 'credits' },
               { element: <WorkspaceSlugSettingsUsagePage />, path: 'usage' },
               { element: <WorkspaceSlugSettingsServiceModelPage />, path: 'service-model' },
