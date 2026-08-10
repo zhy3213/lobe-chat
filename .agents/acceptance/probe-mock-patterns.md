@@ -565,6 +565,7 @@ agent-browser --session "$RUN_SESSION" \
 
 Then assert `get url` and `app-probe.sh auth` on that exact session before
 capturing evidence.
+
 ### Agent-browser navigation hangs after an orphaned Next child keeps the port
 
 **Situation:** an isolated full-stack dev launcher exits, but its Next child
@@ -1110,6 +1111,44 @@ every `[startAt, endAt)` from that. When a day view comes back empty, diff the
 client's real request window (fetch wrapper on the batch URL) against the seeded
 timestamps before suspecting the query.
 
+### An `ActionIcon` is not a `<button>` — select it by its lucide class, click through agent-browser
+
+**Situation:** driving an icon-only affordance inside a popover or panel (`ActionIcon`
+from `@lobehub/ui`: refresh, calendar, more, …).
+
+**Doesn't work:** three separate near-misses, each of which reads as "the affordance
+does not exist" rather than as a driving error:
+
+- `pop.querySelectorAll('button')` misses it. `ActionIcon` renders a `div`/`span`
+  wrapper (`class="lobe-flex …"` around `span.anticon`), so a button-only sweep of a
+  popover reports zero controls and invites the wrong conclusion that the entry was
+  never rendered.
+- `el.click()` on that wrapper `div` resolves and returns, but no handler runs — the
+  React `onClick` sits on an inner node, so the tab-clicking recipe above does not
+  transfer to icon buttons.
+- `agent-browser click --x <n> --y <n>` is not a thing; `click` only takes a CSS
+  selector, XPath, or an `@eN` snapshot ref, and coordinates fail with the generic
+  `Element not found`, which reads as a missing element rather than a bad invocation.
+
+**Works:** find the icon by its lucide class, tag it, and let agent-browser do the
+real click:
+
+```bash
+agent-browser --cdp 9222 eval '(() => {
+  const pop = [...document.querySelectorAll("[role=dialog]")].pop();
+  pop.querySelector("svg.lucide-calendar-days").setAttribute("data-qc", "entry");
+  return "tagged";
+})()'
+agent-browser --cdp 9222 click "[data-qc=entry]"
+```
+
+Enumerate candidates with `pop.querySelectorAll("button,[role=button],span[role]")`
+and read each node's `svg` class when the icon's identity is unknown. Two follow-ons
+worth knowing: a stray click on a tagged text node can dismiss the popover (re-open
+and re-tag rather than assuming the control vanished), and a `Tooltip`-wrapped cell
+needs a real pointer move (`Input.dispatchMouseEvent` over several coordinates, or a
+dispatched `pointerover`+`mouseover` pair) before its content mounts.
+
 ## Detailed references
 
 - [Probe field notes](./references/probe-field-notes.md) — all historical
@@ -1174,3 +1213,22 @@ before pushing. Recovery for a mistaken main-repo commit: `git reset --mixed HEA
 restores the user's branch and leaves their working tree as it was (verify against
 the session-start `gitStatus` snapshot); nothing needs force-pushing because the
 wrong-branch push was a no-op.
+
+### Electron dev 的 BackendProxy 指向登录快照里持久化的 server 端口 — 铸会话 + CDP 注入 cookie
+
+**Situation:** worktree 里起 Electron surface 验证纯前端改动，renderer 一切正常但
+`app-probe.sh server-auth` 返回 502，用户状态 `isUserStateInit` 一直 false（受它门控的
+UI—— 如 Labs 分栏 —— 静默不渲染，store 状态看起来 "设置了但没生效"）。
+
+**Doesn't work:** 把 dev server 起在 3010 或 test-env.sh 解析出的动态端口。桌面主进程的
+BackendProxy 目标端口持久化在登录快照的 userData 里（`/tmp/electron-dev.log` 里
+`BackendProxy upstream fetch failed ... http://localhost:<port>` 是唯一真相），与当前
+ports-file 无关。端口对上后若见 401，是快照 cookie 对本地库已失效 —— 重启 Electron 重种快照
+也救不回来。
+
+**Works:** 三步：① 从日志读出 BackendProxy 的目标端口，`PORT=<该端口>` 起 dev server；
+② 用 web-seed 同款 curl 铸 better-auth 会话（`POST /api/auth/sign-in/email`，seeded 用户；
+从 renderer 内 fetch 会因 app\://origin 被 403，必须 curl）；③ 把 `better-auth.session_data`
+/ `better-auth.session_token` 两个 cookie 经 raw CDP `Network.setCookie`（url 填
+`http://localhost:<端口>/`）写进 Electron 的 cookie store，`location.reload()` 后
+server-auth 200、`isUserStateInit` true。
