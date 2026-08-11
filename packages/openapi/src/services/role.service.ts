@@ -1,12 +1,12 @@
 import type { SQL } from 'drizzle-orm';
 import { and, count, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 
-import type { RoleItem } from '@/database/schemas/rbac';
 import { permissions, rolePermissions, roles, userRoles } from '@/database/schemas/rbac';
 import type { LobeChatDatabase } from '@/database/type';
 
 import { BaseService } from '../common/base.service';
 import { processPaginationConditions } from '../helpers/pagination';
+import { projectPublicRole, type PublicRole } from '../helpers/public-fields';
 import type { ServiceResult } from '../types';
 import type {
   CreateRoleRequest,
@@ -85,7 +85,7 @@ export class RoleService extends BaseService {
       ]);
 
       return {
-        roles: listResult,
+        roles: listResult.map(projectPublicRole),
         total: totalResult[0]?.count || 0,
       };
     } catch (error) {
@@ -97,7 +97,7 @@ export class RoleService extends BaseService {
    * Get all active roles in the system
    * @returns Promise<RoleItem[]> - Array of active roles
    */
-  async getActiveRoles(): ServiceResult<RoleItem[]> {
+  async getActiveRoles(): ServiceResult<PublicRole[]> {
     // Permission check
     const permissionResult = await this.resolveOperationPermission('RBAC_ROLE_READ');
     if (!permissionResult.isPermitted) {
@@ -107,10 +107,11 @@ export class RoleService extends BaseService {
     }
 
     try {
-      return await this.db.query.roles.findMany({
+      const activeRoles = await this.db.query.roles.findMany({
         orderBy: [roles.isSystem, roles.createdAt],
         where: and(eq(roles.isActive, true), this.getRoleScopeWhere()),
       });
+      return activeRoles.map(projectPublicRole);
     } catch (error) {
       this.handleServiceError(error, 'get active role list');
     }
@@ -121,7 +122,7 @@ export class RoleService extends BaseService {
    * @param id - Role ID
    * @returns Promise<RoleItem | undefined> - Role item or undefined if not found
    */
-  async getRoleById(id: string): ServiceResult<RoleItem | null> {
+  async getRoleById(id: string): ServiceResult<PublicRole | null> {
     // Permission check
     const permissionResult = await this.resolveOperationPermission('RBAC_ROLE_READ');
     if (!permissionResult.isPermitted) {
@@ -134,7 +135,7 @@ export class RoleService extends BaseService {
       const role = await this.db.query.roles.findFirst({
         where: and(eq(roles.id, id), this.getRoleScopeWhere()),
       });
-      return role || null;
+      return role ? projectPublicRole(role) : null;
     } catch (error) {
       this.handleServiceError(error, 'get role details');
     }
@@ -145,7 +146,7 @@ export class RoleService extends BaseService {
    * @param name - Role name
    * @returns Promise<RoleItem | undefined> - Role item or undefined if not found
    */
-  async getRoleByName(name: string): ServiceResult<RoleItem | null> {
+  async getRoleByName(name: string): ServiceResult<PublicRole | null> {
     // Permission check
     const permissionResult = await this.resolveOperationPermission('RBAC_ROLE_READ');
     if (!permissionResult.isPermitted) {
@@ -158,7 +159,7 @@ export class RoleService extends BaseService {
       const role = await this.db.query.roles.findFirst({
         where: and(eq(roles.name, name), this.getRoleScopeWhere()),
       });
-      return role || null;
+      return role ? projectPublicRole(role) : null;
     } catch (error) {
       this.handleServiceError(error, 'get role details');
     }
@@ -167,7 +168,7 @@ export class RoleService extends BaseService {
   /**
    * Create a new role
    */
-  async createRole(payload: CreateRoleRequest): ServiceResult<RoleItem> {
+  async createRole(payload: CreateRoleRequest): ServiceResult<PublicRole> {
     this.log('info', 'create role', { payload });
 
     const permissionResult = await this.resolveOperationPermission('RBAC_ROLE_CREATE');
@@ -203,7 +204,7 @@ export class RoleService extends BaseService {
           roleId: createdRole.id,
           roleName: createdRole.name,
         });
-        return createdRole;
+        return projectPublicRole(createdRole);
       });
     } catch (error) {
       this.handleServiceError(error, 'create role');
@@ -394,7 +395,7 @@ export class RoleService extends BaseService {
    * @param updateData - Role update data
    * @returns Promise<RoleItem> - Updated role item
    */
-  async updateRole(id: string, updateData: UpdateRoleRequest): ServiceResult<RoleItem> {
+  async updateRole(id: string, updateData: UpdateRoleRequest): ServiceResult<PublicRole> {
     this.log('info', 'update role info', { roleId: id, updateData });
 
     // Permission check
@@ -452,7 +453,7 @@ export class RoleService extends BaseService {
           .returning();
 
         this.log('info', 'role updated successfully', { roleId: id, roleName: updatedRole.name });
-        return updatedRole;
+        return projectPublicRole(updatedRole);
       });
     } catch (error) {
       this.handleServiceError(error, 'update role');
