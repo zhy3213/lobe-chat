@@ -14,6 +14,7 @@ import {
   sharedOptimizeDeps,
   sharedPwaGlobIgnores,
   sharedPwaRuntimeCaching,
+  sharedRendererDedupe,
   sharedRendererDefine,
   sharedRendererPlugins,
 } from './plugins/vite/sharedRendererConfig';
@@ -144,14 +145,7 @@ export default defineConfig({
     bundledDev: false,
   },
   resolve: {
-    alias: {
-      // Vite 8/Rolldown rejects this exported subpath under browser/production
-      // conditions, so point the SPA build at the published module file.
-      '@lobehub/editor/litexml-commands': path.resolve(
-        __dirname,
-        'node_modules/@lobehub/editor/es/plugins/litexml/command/symbols.js',
-      ),
-    },
+    dedupe: sharedRendererDedupe,
     tsconfigPaths: true,
   },
   optimizeDeps: sharedOptimizeDeps,
