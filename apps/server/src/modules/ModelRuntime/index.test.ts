@@ -29,12 +29,18 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildPayloadFromKeyVaults,
   getServerDefaultHeterogeneousModels,
+  initModelRuntimeFromServerConfig,
   initModelRuntimeWithUserPayload,
   resolveServerDefaultHeterogeneousModel,
   resolveServerModel,
 } from './index';
 
 const getServerGlobalConfig = vi.hoisted(() => vi.fn());
+const loadModels = vi.hoisted(() => vi.fn());
+
+vi.mock('@/business/client/model-bank/loadModels', () => ({
+  loadModels,
+}));
 
 vi.mock('@/server/globalConfig', () => ({
   getServerGlobalConfig,
@@ -162,6 +168,42 @@ describe('getServerDefaultHeterogeneousModels', () => {
       'codex': [{ model: 'gpt-5.4' }],
     });
   });
+
+  it('uses the model bank when the deployment has no explicit server model list', async () => {
+    getServerGlobalConfig.mockResolvedValue({
+      aiProvider: {
+        lobehub: { enabled: true, serverModelLists: undefined },
+      },
+    });
+    loadModels.mockResolvedValue([
+      {
+        enabled: true,
+        id: 'claude-sonnet-4-6',
+        providerId: 'lobehub',
+        source: 'builtin',
+        type: 'chat',
+      },
+      {
+        enabled: true,
+        id: 'gpt-5.4',
+        providerId: 'lobehub',
+        source: 'builtin',
+        type: 'chat',
+      },
+      {
+        enabled: true,
+        id: 'claude-opus-4-8',
+        providerId: 'anthropic',
+        source: 'builtin',
+        type: 'chat',
+      },
+    ]);
+
+    await expect(getServerDefaultHeterogeneousModels()).resolves.toEqual({
+      'claude-code': [{ model: 'claude-sonnet-4-6' }],
+      'codex': [{ model: 'gpt-5.4' }],
+    });
+  });
 });
 
 describe('resolveServerDefaultHeterogeneousModel', () => {
@@ -203,6 +245,45 @@ describe('resolveServerDefaultHeterogeneousModel', () => {
     await expect(resolveServerDefaultHeterogeneousModel('codex', 'gpt-4o')).rejects.toThrow(
       'not compatible with this heterogeneous agent',
     );
+  });
+
+  it('resolves a model-bank model when no explicit server model list exists', async () => {
+    getServerGlobalConfig.mockResolvedValue({
+      aiProvider: {
+        lobehub: { enabled: true, serverModelLists: undefined },
+      },
+    });
+    loadModels.mockResolvedValue([
+      {
+        enabled: true,
+        id: 'claude-sonnet-4-6',
+        providerId: 'lobehub',
+        source: 'builtin',
+        type: 'chat',
+      },
+    ]);
+
+    await expect(
+      resolveServerDefaultHeterogeneousModel('claude-code', 'claude-sonnet-4-6'),
+    ).resolves.toEqual({ model: 'claude-sonnet-4-6', provider: 'lobehub' });
+  });
+});
+
+describe('initModelRuntimeFromServerConfig', () => {
+  it('initializes the LobeHub router directly without protocol-provider credentials', async () => {
+    const runtime = {} as ModelRuntime;
+    const initialize = vi.spyOn(ModelRuntime, 'initializeWithProvider').mockReturnValue(runtime);
+
+    await expect(
+      initModelRuntimeFromServerConfig({ actorUserId: 'user-1', workspaceId: 'workspace-1' }),
+    ).resolves.toBe(runtime);
+
+    expect(initialize).toHaveBeenCalledWith(
+      ModelProvider.LobeHub,
+      { userId: 'user-1' },
+      expect.anything(),
+    );
+    initialize.mockRestore();
   });
 });
 
