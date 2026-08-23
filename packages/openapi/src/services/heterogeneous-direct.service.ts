@@ -5,7 +5,13 @@ import type {
   OpenAIChatMessage,
   UserMessageContentPart,
 } from '@lobechat/model-runtime';
-import { RequestTrigger } from '@lobechat/types';
+import type { CodexReasoningEffort } from '@lobechat/types';
+import {
+  getCodexReasoningEffortLevels,
+  isCodexServerDefaultCustomModel,
+  RequestTrigger,
+  SERVER_DEFAULT_HETEROGENEOUS_MODEL_ALIAS,
+} from '@lobechat/types';
 import { isRecord } from '@lobechat/utils/object';
 
 import type { ServerDefaultHeterogeneousAgentType } from '@/server/modules/ModelRuntime';
@@ -16,7 +22,7 @@ import {
 
 import type { BaseStreamEvent } from '../types/responses.type';
 
-export const SERVER_DEFAULT_MODEL_ALIAS = 'lobehub-default';
+export const SERVER_DEFAULT_MODEL_ALIAS = SERVER_DEFAULT_HETEROGENEOUS_MODEL_ALIAS;
 
 const textFromParts = (content: unknown): string => {
   if (typeof content === 'string') return content;
@@ -320,14 +326,48 @@ const parseProtocolStream = (stream: ReadableStream<Uint8Array>) => {
 
 const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
-export const encodeAnthropicStream = (source: ReadableStream<Uint8Array>) => {
+const nonNegativeNumber = (value: unknown): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
+  return value;
+};
+
+interface AnthropicStreamUsage {
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/**
+ * Map a LobeHub protocol `usage` event onto Anthropic `message_delta.usage`.
+ * `message_start` is emitted before upstream usage exists, so Claude Code treats
+ * this snapshot as the final turn total (input + cache + output).
+ */
+const toAnthropicStreamUsage = (data: Record<string, unknown>): AnthropicStreamUsage => {
+  const cached = nonNegativeNumber(data.inputCachedTokens);
+  const written = nonNegativeNumber(data.inputWriteCacheTokens);
+  const totalInput = nonNegativeNumber(data.totalInputTokens) ?? 0;
+  const miss = nonNegativeNumber(data.inputCacheMissTokens);
+  const hasCache = (cached ?? 0) > 0 || (written ?? 0) > 0;
+
+  return {
+    ...(written ? { cache_creation_input_tokens: written } : {}),
+    ...(cached ? { cache_read_input_tokens: cached } : {}),
+    input_tokens: hasCache
+      ? (miss ?? Math.max(0, totalInput - (cached ?? 0) - (written ?? 0)))
+      : totalInput,
+    output_tokens: nonNegativeNumber(data.totalOutputTokens) ?? 0,
+  };
+};
+
+export const encodeAnthropicStream = (source: ReadableStream<Uint8Array>, model: string) => {
   const messageId = `msg_${randomUUID().replaceAll('-', '')}`;
   let finalized = false;
   let nextIndex = 0;
   let stopReason: string | undefined;
   let textIndex: number | undefined;
   let thinkingIndex: number | undefined;
-  let usage = { input_tokens: 0, output_tokens: 0 };
+  let usage: AnthropicStreamUsage = { input_tokens: 0, output_tokens: 0 };
   const tools = new Map<number, { blockIndex: number; id: string; name: string }>();
   const closeTextBlocks = (controller: TransformStreamDefaultController<string>) => {
     for (const index of [textIndex, thinkingIndex]) {
@@ -357,7 +397,7 @@ export const encodeAnthropicStream = (source: ReadableStream<Uint8Array>) => {
           stop_sequence: null,
         },
         type: 'message_delta',
-        usage: { output_tokens: usage.output_tokens },
+        usage,
       }),
     );
     controller.enqueue(sse('message_stop', { type: 'message_stop' }));
@@ -371,7 +411,7 @@ export const encodeAnthropicStream = (source: ReadableStream<Uint8Array>) => {
               message: {
                 content: [],
                 id: messageId,
-                model: SERVER_DEFAULT_MODEL_ALIAS,
+                model,
                 role: 'assistant',
                 stop_reason: null,
                 type: 'message',
@@ -449,10 +489,7 @@ export const encodeAnthropicStream = (source: ReadableStream<Uint8Array>) => {
                 );
             }
           } else if (event.type === 'usage' && isRecord(event.data)) {
-            usage = {
-              input_tokens: Number(event.data.totalInputTokens || 0),
-              output_tokens: Number(event.data.totalOutputTokens || 0),
-            };
+            usage = toAnthropicStreamUsage(event.data);
           } else if (event.type === 'stop') {
             const reason = typeof event.data === 'string' ? event.data : undefined;
             if (!stopReason && reason && reason !== 'message_stop') stopReason = reason;
@@ -479,7 +516,7 @@ export const encodeAnthropicStream = (source: ReadableStream<Uint8Array>) => {
     .pipeThrough(new TextEncoderStream());
 };
 
-export const encodeResponsesStream = (source: ReadableStream<Uint8Array>) => {
+export const encodeResponsesStream = (source: ReadableStream<Uint8Array>, model: string) => {
   const responseId = `resp_${randomUUID().replaceAll('-', '')}`;
   let finalized = false;
   let nextOutputIndex = 0;
@@ -502,7 +539,7 @@ export const encodeResponsesStream = (source: ReadableStream<Uint8Array>) => {
     id: responseId,
     incomplete_details: null,
     instructions: null,
-    model: SERVER_DEFAULT_MODEL_ALIAS,
+    model,
     object: 'response',
     output: [],
     status: 'in_progress',
@@ -829,9 +866,24 @@ export const invokeServerDefaultModel = async (params: {
     actorUserId: params.userId,
     workspaceId: params.workspaceId,
   });
+  const { reasoning, ...chatCompletionsPayload } = params.payload;
+  const requestedReasoningEffort = reasoning?.effort;
+  const reasoningEffort = getCodexReasoningEffortLevels(params.model).includes(
+    requestedReasoningEffort as CodexReasoningEffort,
+  )
+    ? (requestedReasoningEffort as ChatStreamPayload['reasoning_effort'])
+    : undefined;
+  const payload =
+    params.agentType === 'codex' && isCodexServerDefaultCustomModel(params.model)
+      ? {
+          ...chatCompletionsPayload,
+          apiMode: 'chatCompletion' as const,
+          reasoning_effort: params.payload.reasoning_effort ?? reasoningEffort,
+        }
+      : params.payload;
   const response = await runtime.chat(
     {
-      ...params.payload,
+      ...payload,
       model,
       stream: true,
     },

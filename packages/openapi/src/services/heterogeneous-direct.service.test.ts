@@ -34,7 +34,15 @@ const protocolStream = (events: Array<{ data: unknown; id?: string; type: string
   });
 };
 
+const ANTHROPIC_STREAM_MODEL = 'lobehub/claude-sonnet-4-6';
+const RESPONSES_STREAM_MODEL = 'lobehub/gpt-5.4';
+
 const readText = async (stream: ReadableStream<Uint8Array>) => new Response(stream).text();
+
+const anthropicSse = (source: ReadableStream<Uint8Array>) =>
+  encodeAnthropicStream(source, ANTHROPIC_STREAM_MODEL);
+const responsesSse = (source: ReadableStream<Uint8Array>) =>
+  encodeResponsesStream(source, RESPONSES_STREAM_MODEL);
 
 const parseSseEvents = (output: string) =>
   output
@@ -99,15 +107,62 @@ describe('heterogeneous direct invocation protocol', () => {
     const result = await invokeServerDefaultModel({
       agentType: 'codex',
       model: 'gpt-5.4',
-      payload: { messages: [], model: 'lobehub-default', stream: true },
+      payload: {
+        apiMode: 'responses',
+        messages: [],
+        model: 'lobehub-default',
+        reasoning: { effort: 'high', summary: 'detailed' },
+        stream: true,
+      },
       signal: new AbortController().signal,
       userId: 'user-1',
     });
 
     const runtimePayload = chat.mock.calls[0][0];
     expect(result.model).toBe('prod-gpt');
-    expect(runtimePayload).toMatchObject({ messages: [], model: 'prod-gpt', stream: true });
+    expect(runtimePayload).toMatchObject({
+      apiMode: 'responses',
+      messages: [],
+      model: 'prod-gpt',
+      reasoning: { effort: 'high', summary: 'detailed' },
+      stream: true,
+    });
     expect(runtimePayload).not.toHaveProperty('deploymentName');
+  });
+
+  it('adapts custom Codex relay models to chat completions with their reasoning effort', async () => {
+    const chat = vi.fn().mockResolvedValue(new Response('stream'));
+    vi.mocked(resolveServerDefaultHeterogeneousModel).mockResolvedValue({
+      model: 'deepseek-v4-pro',
+      provider: 'lobehub',
+    });
+    vi.mocked(initModelRuntimeFromServerConfig).mockResolvedValue({
+      chat,
+    } as unknown as Awaited<ReturnType<typeof initModelRuntimeFromServerConfig>>);
+
+    await invokeServerDefaultModel({
+      agentType: 'codex',
+      model: 'deepseek-v4-pro',
+      payload: {
+        apiMode: 'responses',
+        messages: [],
+        model: 'lobehub-default',
+        reasoning: { effort: 'max', summary: 'detailed' },
+        stream: true,
+      },
+      signal: new AbortController().signal,
+      userId: 'user-1',
+    });
+
+    const runtimePayload = chat.mock.calls[0][0];
+    expect(runtimePayload).toMatchObject({
+      apiMode: 'chatCompletion',
+      messages: [],
+      model: 'deepseek-v4-pro',
+      reasoning_effort: 'max',
+      stream: true,
+    });
+    expect(runtimePayload).not.toHaveProperty('reasoning');
   });
 
   it('fails closed before runtime initialization for an unsupported direct protocol route', async () => {
@@ -264,14 +319,14 @@ describe('heterogeneous direct invocation protocol', () => {
       },
     });
 
-    await expect(readText(encodeAnthropicStream(source))).resolves.toContain(
+    await expect(readText(anthropicSse(source))).resolves.toContain(
       '"text":"tail","type":"text_delta"',
     );
   });
 
   it('encodes Anthropic reasoning and parallel tool argument deltas', async () => {
     const output = await readText(
-      encodeAnthropicStream(
+      anthropicSse(
         protocolStream([
           { data: 'thinking', type: 'reasoning' },
           {
@@ -294,7 +349,7 @@ describe('heterogeneous direct invocation protocol', () => {
 
   it('finalizes Anthropic stop, usage, and message_stop exactly once', async () => {
     const output = await readText(
-      encodeAnthropicStream(
+      anthropicSse(
         protocolStream([
           { data: 'hello', type: 'text' },
           { data: 'end_turn', type: 'stop' },
@@ -315,8 +370,56 @@ describe('heterogeneous direct invocation protocol', () => {
     expect(events.filter(({ type }) => type === 'message_stop')).toHaveLength(1);
     expect(events.at(-2)?.data).toMatchObject({
       delta: { stop_reason: 'end_turn' },
-      usage: { output_tokens: 4 },
     });
+    expect(events.at(-2)?.data.usage).toEqual({ input_tokens: 7, output_tokens: 4 });
+  });
+
+  it('forwards Anthropic cache-split input on message_delta without double-counting', async () => {
+    const output = await readText(
+      anthropicSse(
+        protocolStream([
+          { data: 'hello', type: 'text' },
+          {
+            data: {
+              inputCachedTokens: 10,
+              inputCacheMissTokens: 90,
+              inputWriteCacheTokens: 20,
+              totalInputTokens: 120,
+              totalOutputTokens: 5,
+            },
+            type: 'usage',
+          },
+        ]),
+      ),
+    );
+
+    const delta = parseSseEvents(output).find(({ type }) => type === 'message_delta');
+    expect(delta?.data.usage).toEqual({
+      cache_creation_input_tokens: 20,
+      cache_read_input_tokens: 10,
+      input_tokens: 90,
+      output_tokens: 5,
+    });
+  });
+
+  it('echoes the namespaced catalog model on Anthropic message_start and Responses objects', async () => {
+    const anthropic = parseSseEvents(
+      await readText(
+        encodeAnthropicStream(
+          protocolStream([{ data: 'hi', type: 'text' }]),
+          ANTHROPIC_STREAM_MODEL,
+        ),
+      ),
+    );
+    expect(anthropic[0]).toMatchObject({
+      data: { message: { model: ANTHROPIC_STREAM_MODEL } },
+      type: 'message_start',
+    });
+
+    const responses = await readText(
+      encodeResponsesStream(protocolStream([{ data: 'hi', type: 'text' }]), RESPONSES_STREAM_MODEL),
+    );
+    expect(responses).toContain(`"model":"${RESPONSES_STREAM_MODEL}"`);
   });
 
   it.each([
@@ -345,7 +448,7 @@ describe('heterogeneous direct invocation protocol', () => {
       name: 'duplicate stop sentinels',
     },
   ])('finalizes Responses $name exactly once', async ({ events: protocolEvents }) => {
-    const output = await readText(encodeResponsesStream(protocolStream(protocolEvents)));
+    const output = await readText(responsesSse(protocolStream(protocolEvents)));
     const events = parseSseEvents(output);
     const nativeEvents = events.filter(({ type }) => type);
     const terminalEvents = nativeEvents.filter(({ type }) =>
@@ -375,7 +478,7 @@ describe('heterogeneous direct invocation protocol', () => {
 
   it('encodes Responses incomplete and failed terminal lifecycle events', async () => {
     const incomplete = await readText(
-      encodeResponsesStream(
+      responsesSse(
         protocolStream([
           { data: 'partial', type: 'text' },
           { data: 'max_tokens', type: 'stop' },
@@ -388,9 +491,7 @@ describe('heterogeneous direct invocation protocol', () => {
     expect(incomplete).not.toContain('event: response.completed');
 
     const failed = await readText(
-      encodeResponsesStream(
-        protocolStream([{ data: { message: 'provider unavailable' }, type: 'error' }]),
-      ),
+      responsesSse(protocolStream([{ data: { message: 'provider unavailable' }, type: 'error' }])),
     );
     expect(failed).toContain('event: response.failed');
     expect(failed).toContain('"error":{"code":"server_error","message":"provider unavailable"}');
@@ -401,7 +502,7 @@ describe('heterogeneous direct invocation protocol', () => {
 
   it('assigns distinct Responses output indexes to reasoning, text, and tools', async () => {
     const output = await readText(
-      encodeResponsesStream(
+      responsesSse(
         protocolStream([
           { data: 'think', type: 'reasoning' },
           { data: 'answer', type: 'text' },
@@ -430,7 +531,7 @@ describe('heterogeneous direct invocation protocol', () => {
       type: 'reasoning',
     };
     const output = await readText(
-      encodeResponsesStream(
+      responsesSse(
         protocolStream([
           { data: reasoningItem, type: 'reasoning_response_item' },
           { data: 'stop', type: 'stop' },
@@ -454,7 +555,7 @@ describe('heterogeneous direct invocation protocol', () => {
     };
     const events = parseSseEvents(
       await readText(
-        encodeResponsesStream(
+        responsesSse(
           protocolStream([
             { data: 'thinking', id: 'reasoning-current', type: 'reasoning' },
             {
