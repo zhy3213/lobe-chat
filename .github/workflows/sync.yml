@@ -129,6 +129,10 @@ jobs:
           done
           exit "$missing"
 
+      - name: Enable Vercel large functions
+        if: steps.sync.outputs.changed == 'true'
+        run: npx --yes vercel@${VERCEL_CLI_VERSION} env add VERCEL_SUPPORT_LARGE_FUNCTIONS production --value 1 --force --yes --no-sensitive --token="$VERCEL_TOKEN"
+
       - name: Pull Vercel production environment
         if: steps.sync.outputs.changed == 'true'
         run: npx --yes vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production --token="$VERCEL_TOKEN"
@@ -146,8 +150,9 @@ jobs:
             echo "Vercel deploy attempt ${attempt}/3"
             if url="$(npx --yes vercel@${VERCEL_CLI_VERSION} deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN")"; then
               break
+            else
+              status="$?"
             fi
-            status="$?"
             if [ "$attempt" -eq 3 ]; then
               exit "$status"
             fi
