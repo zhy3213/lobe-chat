@@ -29,8 +29,11 @@ import { AgentRuntimeCoordinator } from '@/server/modules/AgentRuntime/AgentRunt
 
 import { TaskService } from '../task';
 import { TaskRunnerService } from '../taskRunner';
+import { VerifyPlanGeneratorService } from '../verify/planGenerator';
 import { GoalCriteriaGeneratorService } from './criteriaGenerator';
+import { LEASE_EXPIRED_ERROR, VERIFICATION_FAILED_ERROR } from './decideNextMove';
 import { GoalService } from './index';
+import { VERIFY_SETTLE_GRACE_MS } from './recoveryPolicy';
 import type { GoalTickObservation } from './traceObservation';
 
 const serverDB: LobeChatDatabase = await getTestDB();
@@ -59,6 +62,64 @@ afterEach(async () => {
 });
 
 describe('GoalService', () => {
+  it('persists structured criteria on create and records their ids on the goal config', async () => {
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({
+      criteria: [
+        { description: 'Runs end to end locally', title: 'Local run works' },
+        { instruction: 'Check README covers install and run', title: 'Docs are complete' },
+      ],
+      title: 'Structured goal',
+      work: ['Only work'],
+    });
+
+    const criteriaIds = graph.goal.config?.acceptance?.criteriaIds ?? [];
+    expect(criteriaIds).toHaveLength(2);
+
+    const rows = await serverDB.query.verifyCriteria.findMany();
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get(criteriaIds[0])?.title).toBe('Local run works');
+    expect(byId.get(criteriaIds[1])?.title).toBe('Docs are complete');
+    // the how-to-judge instruction landed in a linked document
+    expect(byId.get(criteriaIds[1])?.documentId).toBeTruthy();
+  });
+
+  it('rebinding criteria also updates the dispatched terminal acceptance task', async () => {
+    // Editing the standard after the terminal Goal-acceptance Work exists must
+    // not leave that Work's Acceptance gating on the stale id list.
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const graph = await service.create({
+      criteria: [{ title: 'Original criterion' }],
+      requirement: 'Deliver with evidence',
+      title: 'Rebind criteria goal',
+      work: ['Only work'],
+    });
+
+    const created = await service.tick(graph.goal.id);
+    await taskModel.updateStatus(created.taskId!, 'completed');
+    await service.tick(graph.goal.id); // synthesize finding
+    await service.tick(graph.goal.id); // create acceptance work
+    const acceptanceTaskCreated = await service.tick(graph.goal.id); // dispatch it
+    expect(acceptanceTaskCreated.taskId).toBeDefined();
+
+    const [replacementId] = await new VerifyPlanGeneratorService(
+      serverDB,
+      userId,
+    ).createCriteriaFromDrafts([
+      { onFail: 'manual', required: true, title: 'Replacement criterion', verifierType: 'agent' },
+    ]);
+    await service.setAcceptanceCriteria(graph.goal.id, [replacementId]);
+
+    const goal = (await service.graph(graph.goal.id)).goal;
+    expect(goal.config?.acceptance?.criteriaIds).toEqual([replacementId]);
+    const acceptance = await new AcceptanceModel(serverDB, userId).findBySubject(
+      'task',
+      acceptanceTaskCreated.taskId!,
+    );
+    expect(acceptance?.config?.verifyCriteriaIds).toEqual([replacementId]);
+  });
+
   it('creates only one responsible task when ticks race on the same work node', async () => {
     const service = new GoalService(serverDB, userId);
     const graph = await service.create({ title: 'Concurrent goal', work: ['Single owner work'] });
@@ -116,6 +177,31 @@ describe('GoalService', () => {
     expect(runSpy).toHaveBeenCalledTimes(1);
   });
 
+  it.each([LEASE_EXPIRED_ERROR, VERIFICATION_FAILED_ERROR])(
+    'does not dispatch recovery for an overdue goal with %s',
+    async (error) => {
+      const runSpy = vi
+        .spyOn(TaskRunnerService.prototype, 'runTask')
+        .mockResolvedValue({} as never);
+      const service = new GoalService(serverDB, userId);
+      const taskModel = new TaskModel(serverDB, userId);
+      const graph = await service.create({
+        config: { schedule: { deadline: new Date(Date.now() - 1000).toISOString() } },
+        title: `Overdue recovery ${error}`,
+        work: ['Do not retry'],
+      });
+      const created = await service.tick(graph.goal.id);
+      await taskModel.updateStatus(created.taskId!, 'paused', { error });
+      runSpy.mockClear();
+
+      const stopped = await service.tick(graph.goal.id);
+
+      expect(runSpy).not.toHaveBeenCalled();
+      expect(stopped).toMatchObject({ outcome: 'no_progress' });
+      expect(stopped.message).toContain('Deadline passed');
+    },
+  );
+
   it('hands back a dispatch claim whose worker died before the run existed', async () => {
     // The claim is taken just before `runTask` creates the topic. If the worker
     // dies in that sliver the task is `running` with no operation to reclaim,
@@ -141,6 +227,120 @@ describe('GoalService', () => {
     expect(released.outcome).toBe('advanced');
     expect((await taskModel.findById(created.taskId!))?.status).toBe('backlog');
     runSpy.mockRestore();
+  });
+
+  it('does not re-dispatch a delivered Work while verification is still judging', async () => {
+    // A verify-bound Work keeps its task `running` with a completed topic until
+    // the verify run settles, and that judgment routinely outlives the
+    // operation lease. Treating the window as a dead claim released the task
+    // back to backlog, and the next advance paid for a ghost attempt that the
+    // verify settle path then canceled.
+    const runSpy = vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const graph = await service.create({
+      config: { recovery: { operationLeaseTimeoutMs: 60_000 } },
+      title: 'Deliveries wait for verification',
+      work: ['Deliver and wait'],
+    });
+    const created = await service.tick(graph.goal.id);
+    await serverDB.insert(taskTopics).values({
+      operationId: 'op-delivered',
+      seq: 1,
+      status: 'completed',
+      taskId: created.taskId!,
+      userId,
+    });
+    await taskModel.updateStatus(created.taskId!, 'running');
+    await serverDB
+      .update(tasks)
+      .set({ updatedAt: new Date(Date.now() - 10 * 60 * 1000) })
+      .where(eq(tasks.id, created.taskId!));
+
+    const waiting = await service.tick(graph.goal.id);
+
+    expect(waiting).toMatchObject({
+      message: expect.stringContaining('waiting for verification'),
+      outcome: 'waiting_external',
+      taskId: created.taskId,
+    });
+    expect((await taskModel.findById(created.taskId!))?.status).toBe('running');
+    expect(runSpy).not.toHaveBeenCalled();
+  });
+
+  it('reclaims a delivered Work once the verification grace window lapses', async () => {
+    // The hold-off above cannot be unconditional: a verify run that died
+    // silently would otherwise strand the goal forever, which is exactly the
+    // failure mode the sweep exists to break.
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const graph = await service.create({
+      config: { recovery: { operationLeaseTimeoutMs: 60_000 } },
+      title: 'Dead verification is reclaimed',
+      work: ['Deliver into silence'],
+    });
+    const created = await service.tick(graph.goal.id);
+    await serverDB.insert(taskTopics).values({
+      createdAt: new Date(Date.now() - VERIFY_SETTLE_GRACE_MS - 60_000),
+      operationId: 'op-delivered-stale',
+      seq: 1,
+      status: 'completed',
+      taskId: created.taskId!,
+      userId,
+    });
+    await taskModel.updateStatus(created.taskId!, 'running');
+    await serverDB
+      .update(tasks)
+      .set({ updatedAt: new Date(Date.now() - 10 * 60 * 1000) })
+      .where(eq(tasks.id, created.taskId!));
+
+    const released = await service.tick(graph.goal.id);
+
+    expect(released.outcome).toBe('advanced');
+    expect((await taskModel.findById(created.taskId!))?.status).toBe('backlog');
+  });
+
+  it('synthesizes the finding from the delivered topic, not a canceled retry', async () => {
+    // When verification accepts a delivery, the settle path cancels the ghost
+    // retry it superseded — leaving the canceled, handoff-less topic as the
+    // newest row. Reading blindly by seq produced findings titled
+    // "Completed: <work>" with no description.
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const graph = await service.create({ title: 'Consume the delivery', work: ['Deliver me'] });
+    const created = await service.tick(graph.goal.id);
+    await serverDB.insert(taskTopics).values([
+      {
+        handoff: {
+          content: 'Delivered content with the full run summary.',
+          summary: 'Delivered summary',
+          title: 'Delivered title',
+        },
+        operationId: 'op-delivered',
+        seq: 1,
+        status: 'completed',
+        taskId: created.taskId!,
+        userId,
+      },
+      {
+        operationId: 'op-ghost-retry',
+        seq: 2,
+        status: 'canceled',
+        taskId: created.taskId!,
+        userId,
+      },
+    ]);
+    await taskModel.updateStatus(created.taskId!, 'completed');
+
+    await service.tick(graph.goal.id);
+
+    const finding = (await service.graph(graph.goal.id)).nodes.find(
+      (node) => node.kind === 'finding',
+    );
+    expect(finding).toMatchObject({
+      description: 'Delivered content with the full run summary.',
+      title: 'Delivered title',
+    });
   });
 
   it('leaves a fresh dispatch claim alone', async () => {
