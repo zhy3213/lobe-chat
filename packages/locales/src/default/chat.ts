@@ -542,10 +542,6 @@ export default {
     'The provider "{{providerId}}" requires a base URL for this agent.',
   'heteroAgent.apiMode.endpointUnsupported':
     'The provider "{{providerId}}" has an unsupported base URL.',
-  'heteroAgent.apiMode.labDisabled.action': 'Enable in Labs',
-  'heteroAgent.apiMode.labDisabled.desc':
-    'Turn it on in Settings → Labs, or switch this agent to Subscription authentication.',
-  'heteroAgent.apiMode.labDisabled.title': 'Provider binding is a Labs experiment',
   'heteroAgent.apiMode.localOnly.desc':
     'Switch the execution environment to Local device, or use Subscription authentication.',
   'heteroAgent.apiMode.localOnly.title': 'API mode requires Desktop local execution',
@@ -868,6 +864,14 @@ export default {
   'cliAuthGuide.errorDetails': 'Error details',
   'cliAuthGuide.runCommand': 'Run this in Terminal',
   'cliAuthGuide.title': 'Sign in to {{name}}',
+  'cliDetectionTimeoutGuide.actions.openSystemTools': 'Open System Tools',
+  'cliDetectionTimeoutGuide.actions.retry': 'Detect again',
+  'cliDetectionTimeoutGuide.desc':
+    'LobeHub took too long to locate `{{command}}` from your login shell environment.',
+  'cliDetectionTimeoutGuide.errorDetails': 'Technical details',
+  'cliDetectionTimeoutGuide.hint':
+    'This is often caused by a slow shell startup script. Try again, or open System Tools to check the detected command path.',
+  'cliDetectionTimeoutGuide.title': 'Detection timed out for {{name}}',
   'cliOverloadedGuide.actions.retry': 'Retry',
   'cliOverloadedGuide.autoRetry.actions.cancel': 'Stop auto-retry',
   'cliOverloadedGuide.autoRetry.actions.retryNow': 'Retry now',
