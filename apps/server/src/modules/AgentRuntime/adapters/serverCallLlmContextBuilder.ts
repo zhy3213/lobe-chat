@@ -1,4 +1,5 @@
 import type { AgentState, CallLLMPayload } from '@lobechat/agent-runtime';
+import { gatherContextFacts } from '@lobechat/mecha';
 import type { ChatStreamPayload } from '@lobechat/model-runtime';
 import { SpanStatusCode } from '@lobechat/observability-otel/api';
 import {
@@ -8,10 +9,12 @@ import {
 } from '@lobechat/observability-otel/modules/agent-runtime';
 
 import { serverMessagesEngine } from '@/server/modules/Mecha/ContextEngineering';
-import { gatherServerContextFacts } from '@/server/modules/Mecha/ContextEngineering/providers';
+import {
+  createServerContextFactProviders,
+  resolveServerConnectorFeatures,
+} from '@/server/modules/Mecha/ContextEngineering/providers';
 
 import type { RuntimeExecutorContext } from '../context';
-import { resolveRuntimeHistoryCount } from '../executorHelpers';
 import {
   resolveServerCallLlmContextHints,
   type ServerCallLlmContextHints,
@@ -32,6 +35,8 @@ export interface ServerCallLlmContextBuildResult {
   processedMessages: ChatStreamPayload['messages'];
   resolvedExtendParams?: ServerCallLlmContextHints['resolvedExtendParams'];
   shouldReplayAssistantReasoning: boolean;
+  /** An explicit operation-level `stream` wins; otherwise the agent's chat config. */
+  stream?: boolean;
 }
 
 export const buildServerCallLlmContext = async ({
@@ -62,6 +67,8 @@ export const buildServerCallLlmContext = async ({
   });
   const {
     capabilities,
+    enableAgentMode,
+    historyCount,
     messagesForContext,
     modelDisplayName,
     modelKnowledgeCutoff,
@@ -72,26 +79,32 @@ export const buildServerCallLlmContext = async ({
 
   const agentId = state.origin?.agentId;
   const topicId = ctx.topicId ?? state.origin?.topicId;
-  const facts = await gatherServerContextFacts({
-    activeDeviceId,
-    agentId,
-    ctx,
-    enabledToolIds: resolved.enabledToolIds,
-    executionTarget,
-    messagesForContext,
-    state,
-    topicId,
-    workspaceId: state.origin?.workspaceId ?? ctx.workspaceId,
-  });
-
-  const sessionDate = new Intl.DateTimeFormat('en-US', {
-    day: 'numeric',
-    month: 'long',
-    timeZone: state.world?.userTimezone || 'UTC',
-    weekday: 'long',
-    year: 'numeric',
-  }).format(new Date());
-  const memoryEffort = String(agentConfig.chatConfig?.memory?.effort ?? '');
+  // Which facts this turn needs is decided by the shared rules; the server
+  // only answers the lookups they ask for.
+  const facts = await gatherContextFacts(
+    {
+      activeDeviceId,
+      agent: {
+        chatConfig: agentConfig.chatConfig,
+        description: agentConfig.description,
+        slug: agentConfig.slug,
+        title: agentConfig.title,
+      },
+      agentId,
+      disabledPluginIds: state.world?.disabledPluginIds,
+      editingAgentId: state.metadata?.editingAgentId as string | undefined,
+      editingGroupId: state.metadata?.editingGroupId as string | undefined,
+      enabledToolIds: resolved.enabledToolIds,
+      executionTarget,
+      features: resolveServerConnectorFeatures(),
+      mentionedAgents: (state as any).initialContext?.initialContext?.mentionedAgents,
+      messages: messagesForContext,
+      shareVisitor: state.principal?.actor?.shareVisitor ?? ctx.agentShareVisitor,
+      topicId,
+      workspaceId: state.origin?.workspaceId ?? ctx.workspaceId,
+    },
+    createServerContextFactProviders({ ctx, state }),
+  );
 
   const contextEngineInput = {
     additionalContexts: llmPayload.additionalContexts,
@@ -101,19 +114,13 @@ export const buildServerCallLlmContext = async ({
     agentIdentity: { name: agentConfig.name ?? undefined, title: agentConfig.title ?? undefined },
     ...(facts.step.agentBuilderContext && { agentBuilderContext: facts.step.agentBuilderContext }),
     agentGroup: state.world?.group,
-    agentManagementContext: (state as any).initialContext?.initialContext?.mentionedAgents?.length
-      ? {
-          mentionedAgents: (state as any).initialContext.initialContext.mentionedAgents,
-        }
-      : undefined,
+    agentManagementContext: facts.step.agentManagementContext,
     additionalVariables: {
       ...state.binding?.device?.systemInfo,
       ...facts.variables,
       // Only override the generator's 'en-US' locale fallback when the user info
       // fetch actually resolved a language — an empty string would render blank.
-      ...(facts.variables.language && { locale: facts.variables.language }),
-      memory_effort: memoryEffort,
-      session_date: sessionDate,
+      ...(facts.variables.language && { locale: facts.variables.language as string }),
     },
     userTimezone: state.world?.userTimezone,
     capabilities,
@@ -128,7 +135,7 @@ export const buildServerCallLlmContext = async ({
     ...(facts.step.groupAgentBuilderContext && {
       groupAgentBuilderContext: facts.step.groupAgentBuilderContext,
     }),
-    historyCount: resolveRuntimeHistoryCount(agentConfig.chatConfig?.historyCount),
+    historyCount,
     initialContext: (state as any).initialContext?.initialContext,
     knowledge: {
       fileContents: agentConfig.files
@@ -163,7 +170,7 @@ export const buildServerCallLlmContext = async ({
     ...(resolvedSkills?.enabledSkills?.length && {
       skillsConfig: { enabledSkills: resolvedSkills.enabledSkills },
     }),
-    enableAgentMode: agentConfig.chatConfig?.enableAgentMode,
+    enableAgentMode,
     ...(facts.step.topicReferences && { topicReferences: facts.step.topicReferences }),
     ...(facts.step.onboardingContext && { onboardingContext: facts.step.onboardingContext }),
   };
@@ -231,5 +238,6 @@ export const buildServerCallLlmContext = async ({
     processedMessages,
     resolvedExtendParams,
     shouldReplayAssistantReasoning,
+    stream: ctx.stream ?? contextHints.stream,
   };
 };
