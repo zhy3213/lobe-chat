@@ -7,6 +7,7 @@ import { getTestDB } from '@/database/core/getTestDB';
 import { AgentOperationModel } from '@/database/models/agentOperation';
 import { GoalModel } from '@/database/models/goal';
 import { GoalGraphModel } from '@/database/models/goalGraph';
+import { MessageModel } from '@/database/models/message';
 import { TaskModel } from '@/database/models/task';
 import {
   acceptances,
@@ -17,6 +18,7 @@ import {
   goalNodeDecisions,
   goalNodes,
   goals,
+  messages,
   tasks,
   taskTopics,
   topics,
@@ -24,6 +26,7 @@ import {
 } from '@/database/schemas';
 import { goalRouter } from '@/server/routers/lambda/goal';
 import { AiAgentService } from '@/server/services/aiAgent';
+import { TopicStartReservationError } from '@/server/services/aiAgent/topicStartReservation';
 
 import { GoalService } from './index';
 import { GoalManagerService } from './manager';
@@ -89,6 +92,7 @@ afterEach(async () => {
     goals,
     acceptances,
     agentOperations,
+    messages,
     taskTopics,
     topics,
     tasks,
@@ -452,6 +456,73 @@ describe('CLI main Agent planning', () => {
     });
   });
 
+  /**
+   * Regression: every planned task used to hang only off the problem node, so a
+   * multi-round Goal rendered as one flat row with no visible progression.
+   */
+  it('links planned tasks to earlier rounds and earlier tasks through depends_on', async () => {
+    const graph = await service().create({
+      title: 'Second round',
+      createdByAgentId: agentId,
+      config: { manager: { maxTurns: 4 } },
+    });
+    const earlier = await new GoalGraphModel(db, userId).createNode(graph.goal.id, {
+      kind: 'task',
+      status: 'resolved',
+      title: 'R1 · Facts',
+    });
+    expect((await service().tick(graph.goal.id)).outcome).toBe('waiting_external');
+    const state = (await model().findById(graph.goal.id))!.config!.managerState!;
+    const op = await ops().findByTopicSourceMessage(
+      state.topicId,
+      `msg_goal_manager_${state.token}`,
+    );
+
+    await manager().submit(graph.goal.id, state.token, op!.id, {
+      action: 'tasks',
+      reason: 'Analyse on top of the facts',
+      tasks: [
+        { title: 'R2 · Options', description: 'Compare options', dependsOn: [earlier!.id] },
+        { title: 'R3 · Report', description: 'Write the report', dependsOn: [0] },
+      ],
+    });
+
+    const current = await service().graph(graph.goal.id);
+    const byTitle = (title: string) => current.nodes.find((n) => n.title === title)!;
+    const dependsOn = current.edges
+      .filter((edge) => edge.kind === 'depends_on')
+      .map((edge) => [edge.sourceNodeId, edge.targetNodeId]);
+    expect(dependsOn).toEqual(
+      expect.arrayContaining([
+        [byTitle('R2 · Options').id, earlier!.id],
+        [byTitle('R3 · Report').id, byTitle('R2 · Options').id],
+      ]),
+    );
+    expect(dependsOn).toHaveLength(2);
+  });
+
+  it.each([
+    { label: 'a forward index', dependsOn: [1] },
+    { label: 'an unknown node', dependsOn: ['node-that-does-not-exist'] },
+  ])(
+    'rejects a plan whose dependsOn names $label without writing any task',
+    async ({ dependsOn }) => {
+      const { id, state, op } = await start();
+      await expect(
+        manager().submit(id, state.token, op.id, {
+          action: 'tasks',
+          reason: 'Plan with a bad reference',
+          tasks: [
+            { title: 'First', description: 'First task', dependsOn },
+            { title: 'Second', description: 'Second task' },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect((await service().graph(id)).nodes.filter((n) => n.kind === 'task')).toHaveLength(0);
+      expect((await model().findById(id))!.config!.managerState!.submitted).toBeUndefined();
+    },
+  );
+
   it('does not dispatch the previous supervisor when a handoff lands before the claim', async () => {
     const { id, op } = await start();
     await ops().recordCompletion(op.id, { status: 'done' });
@@ -613,6 +684,170 @@ describe('CLI main Agent planning', () => {
 
   it('retains the live turn and pauses instead of replacing an unconfirmed timed-out process', async () => {
     const { id, state } = await start();
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+    const fresh = (await model().findById(id))!;
+    expect(fresh.status).toBe('paused');
+    expect(fresh.config!.managerState!.token).toBe(state.token);
+    expect(fresh.config!.managerState!.consumed).not.toBe(true);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces a timed-out turn that never started instead of pausing on it', async () => {
+    // A refused topic reservation — the planning topic was busy — is raised
+    // before the planning message or any operation is written.
+    const original = vi.mocked(AiAgentService.prototype.execAgent).getMockImplementation()!;
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(async () => {
+      throw new TopicStartReservationError('Topic tpc remained busy while starting operation x');
+    });
+    const { id, state, op } = await start();
+    expect(op).toBeUndefined();
+    expect((await model().findById(id))!.config!.managerState!.dispatchNeverStarted).toBe(true);
+
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('advanced');
+    const settled = (await model().findById(id))!;
+    expect(settled.status).toBe('running');
+    expect(settled.config!.managerState!.token).toBe(state.token);
+    expect(settled.config!.managerState!.consumed).toBe(true);
+
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementation(original);
+    expect((await service().tick(id)).outcome).toBe('waiting_external');
+    const next = (await model().findById(id))!.config!.managerState!;
+    expect(next.token).not.toBe(state.token);
+    expect(next.turns).toBe(state.turns + 1);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps pausing when the planning message is deleted after a dispatch that had started', async () => {
+    // The message was written and the call failed later, so a run may be live.
+    // The owner then deletes the message from their conversation; a later
+    // lookup must not turn that into "never started".
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(async (params) => {
+      await new MessageModel(db, userId).create(
+        {
+          agentId: params.agentId,
+          content: 'plan',
+          role: 'user',
+          topicId: params.appContext!.topicId!,
+        },
+        params.clientIds!.userMessageId,
+      );
+      throw new Error('Topic metadata update failed');
+    });
+    const { id, state } = await start();
+    expect(state.dispatchNeverStarted).toBeUndefined();
+    await db.delete(messages).where(eq(messages.id, `msg_goal_manager_${state.token}`));
+
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+    const fresh = (await model().findById(id))!;
+    expect(fresh.status).toBe('paused');
+    expect(fresh.config!.managerState!.consumed).not.toBe(true);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps pausing a turn whose dispatch failed for any reason other than a refused reservation', async () => {
+    // No message and no operation, but an ordinary failure can come after a run
+    // went live; only the error decides, never the absence of rows.
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(async () => {
+      throw new Error('Something failed while starting');
+    });
+    const { id, state } = await start();
+    expect(state.dispatchNeverStarted).toBeUndefined();
+
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+    expect((await model().findById(id))!.status).toBe('paused');
+  });
+
+  /**
+   * Regression: the pause asked the owner to "confirm its exit before resuming"
+   * with no way to do so, so a Goal paused on a turn recorded before the
+   * never-started verdict existed could not be resumed at all.
+   */
+  it('lets the owner confirm a stuck turn has ended and resume with a fresh one', async () => {
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(
+      async (params) =>
+        ({
+          agentId: params.agentId!,
+          operationId: 'op-lost',
+          topicId: params.appContext!.topicId!,
+        }) as any,
+    );
+    const { id, state } = await start();
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    await service().tick(id);
+    expect((await model().findById(id))!.status).toBe('paused');
+
+    // A plain resume pauses again on the same turn.
+    await service().resume(id);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+
+    expect(await manager().confirmTurnExit(id)).toBe(true);
+    await service().resume(id);
+    // The settled turn no longer holds the Goal: the next advance plans afresh.
+    expect((await service().tick(id)).outcome).toBe('waiting_external');
+    expect((await model().findById(id))!.status).toBe('running');
+    const next = (await model().findById(id))!.config!.managerState!;
+    expect(next.token).not.toBe(state.token);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses to confirm the exit of a turn whose run is still live', async () => {
+    const { id } = await start();
+    await expect(manager().confirmTurnExit(id)).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await model().findById(id))!.config!.managerState!.consumed).not.toBe(true);
+  });
+
+  it('keeps pausing a timed-out turn whose dispatch never reported failure', async () => {
+    // No message and no operation, but the dispatch call never ended in an
+    // error: it may still be initialising and start a paid run later, so the
+    // turn cannot be replaced.
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(
+      async (params) =>
+        ({
+          agentId: params.agentId!,
+          operationId: 'op-still-starting',
+          topicId: params.appContext!.topicId!,
+        }) as any,
+    );
+    const { id, state, op } = await start();
+    expect(op).toBeUndefined();
+
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
+    expect((await service().tick(id)).outcome).toBe('no_progress');
+    const fresh = (await model().findById(id))!;
+    expect(fresh.status).toBe('paused');
+    expect(fresh.config!.managerState!.token).toBe(state.token);
+    expect(fresh.config!.managerState!.consumed).not.toBe(true);
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps pausing a timed-out turn whose message exists but whose operation row is missing', async () => {
+    // The runtime keeps running when its operation insert fails, so a written
+    // planning message with no operation is still an unconfirmed process.
+    vi.mocked(AiAgentService.prototype.execAgent).mockImplementationOnce(async (params) => {
+      await new MessageModel(db, userId).create(
+        {
+          agentId: params.agentId,
+          content: 'plan',
+          role: 'user',
+          topicId: params.appContext!.topicId!,
+        },
+        params.clientIds!.userMessageId,
+      );
+      throw new Error('Operation insert failed');
+    });
+    const { id, state, op } = await start();
+    expect(op).toBeUndefined();
+
     const now = Date.now();
     vi.spyOn(Date, 'now').mockReturnValue(now + 21 * 60_000);
     expect((await service().tick(id)).outcome).toBe('no_progress');

@@ -25,8 +25,14 @@ the new agent's history instead of continuing the previous agent's.
 The main Agent reads `lh goal show`, `lh task view`, `lh topic view`, and document
 commands. It submits a JSON file through `lh goal plan <goal-id> --token <turn> --file plan.json`. The runtime supplies `LOBEHUB_OPERATION_ID`. Plan actions:
 
-- `tasks`: reason and 1–10 objects with title/description. All existing work must
-  first be settled. The coordinator creates and runs ordinary Tasks.
+- `tasks`: reason and 1–10 objects with title/description and an optional
+  `dependsOn` list — existing task node IDs (earlier rounds) or 0-based indexes of
+  earlier tasks in the same plan. Each entry becomes a `depends_on` edge, so the
+  graph lays rounds out in order instead of one flat row; a forward index, an
+  unknown node or a retired/rejected node rejects the whole plan before anything
+  is written. All existing work must first be settled. The coordinator creates
+  and runs ordinary Tasks. The terminal acceptance Task depends on the delivered
+  leaf Tasks, so it renders after the work it closes.
 - `verify`: reason; requests the ordinary independent final acceptance Task.
   This does not mark the Goal achieved.
 - `retry`: reason (checkpoint-aware recovery instruction), taskId and exact
@@ -118,7 +124,7 @@ no concurrent resume or new claim occurred before removing the Goal. This is not
 persistent device process journal. A committed plan survives an errored ending,
 but coordinator dispatch still waits for that terminal operation.
 
-Manager turns are capped separately (default 12, maximum 100); recorded manager
+Manager turns are capped separately (default 50, maximum 100); recorded manager
 cost/tokens are included in detailed Goal spend. External subscription execution
 can be unmetered, so a zero recorded cost is not proof of zero spend. The CLI sends operation-token plan submissions to a dedicated ingestion endpoint,
 which checks the live operation principal and then the Goal turn binding. Normal

@@ -1,8 +1,27 @@
+import type { UIChatMessage } from '@lobechat/types';
+
 // ─── Agent Stream Event (mirrors server StreamEvent) ───
+
+/**
+ * Stream features a client declares when it starts a run
+ * (`aiAgent.execAgent`'s `streamFeatures`), so the server only sends event
+ * shapes that client understands.
+ *
+ * - `member_runtime_end`: a mirrored group member's terminal arrives on the
+ *   supervisor's channel as `member_runtime_end` instead of `agent_runtime_end`.
+ */
+export type AgentStreamClientFeature = 'member_runtime_end';
 
 export type AgentStreamEventType =
   | 'agent_runtime_init'
   | 'agent_runtime_end'
+  /**
+   * A mirrored operation's terminal, delivered on another operation's channel
+   * (a group member finishing, forwarded onto the supervisor's socket). Same
+   * payload as `agent_runtime_end`, but NOT terminal for the channel it rides
+   * on: the gateway only closes a session on `agent_runtime_end`.
+   */
+  | 'member_runtime_end'
   | 'stream_start'
   | 'stream_chunk'
   | 'stream_end'
@@ -39,6 +58,12 @@ export type AgentStreamEventType =
    * cancellation marker.
    */
   | 'agent_intervention_response'
+  /**
+   * Protocol-v2-only canonical conversation delta. Native server agent runs
+   * emit one after each durable step instead of repeating the whole topic on
+   * every `step_start` / `agent_runtime_end` boundary.
+   */
+  | 'message_patch'
   | 'step_start'
   | 'step_complete'
   /**
@@ -57,6 +82,22 @@ export interface AgentStreamEvent {
   stepIndex: number;
   timestamp: number;
   type: AgentStreamEventType;
+}
+
+export interface MessagePatchUpsert {
+  /** Immediate predecessor in the canonical top-level message list. */
+  afterId: string | null;
+  message: UIChatMessage;
+}
+
+/**
+ * Operation-local, monotonic patch carried only by Gateway mux / protocol v2.
+ * A missing revision is recovered with one normal message-list fetch.
+ */
+export interface MessagePatchData {
+  deletes: string[];
+  revision: number;
+  upserts: MessagePatchUpsert[];
 }
 
 export type StreamChunkType =
@@ -151,6 +192,7 @@ export interface ToolEndData {
 }
 
 export interface StepCompleteData {
+  /** Present only when the run opts into includeFinalState. */
   finalState?: unknown;
   phase: string;
   reason?: string;
@@ -331,10 +373,6 @@ export interface HeartbeatMessage {
   type: 'heartbeat';
 }
 
-export interface InterruptMessage {
-  type: 'interrupt';
-}
-
 /**
  * Client → Server: tool execution result, correlated by toolCallId.
  */
@@ -358,8 +396,13 @@ export interface ToolResultMessage {
   workRegistration?: any;
 }
 
-export type ClientMessage =
-  AuthMessage | HeartbeatMessage | InterruptMessage | ResumeMessage | ToolResultMessage;
+/**
+ * The gateway also accepts an `interrupt` frame, but its op DO ignores it and
+ * a stop needs server-side work the socket cannot do (cancelling device/hetero
+ * processes, settling the operation and topic rows). Cancellation therefore
+ * goes through `aiAgent.interruptTask`, and no client here ever sends one.
+ */
+export type ClientMessage = AuthMessage | HeartbeatMessage | ResumeMessage | ToolResultMessage;
 
 // Server → Client
 export interface AuthSuccessMessage {
@@ -479,6 +522,15 @@ export interface AgentStreamClientOptions {
   autoReconnect?: boolean;
   /** Gateway WebSocket URL base (e.g. https://gateway.lobehub.com) */
   gatewayUrl: string;
+  /**
+   * Last event id this operation has already applied, when the stream is being
+   * picked up from another transport (the v1 fallback after the multiplexed
+   * socket gave up). Both protocols read ids from the same per-operation
+   * sequence, so the first `resume` replays only what came after it — events
+   * the client already consumed, `tool_execute` included, are not delivered
+   * twice. Absent ⇒ replay from the beginning.
+   */
+  lastEventId?: string;
   /** Operation ID to subscribe to */
   operationId: string;
   /**
