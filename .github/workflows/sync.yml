@@ -62,13 +62,19 @@ jobs:
             exit 0
           fi
 
+          paths_file="$(mktemp)"
+          trap 'rm -f -- "$paths_file"' EXIT
+
           if ! git merge --no-edit "$upstream_sha"; then
             echo "Merge conflicts detected; preferring upstream for application files."
 
+            # Finish reading the index before any checkout or removal modifies it.
+            git diff --name-only -z --diff-filter=U > "$paths_file"
             while IFS= read -r -d '' conflict_path; do
               if [ "$conflict_path" = ".github/workflows/sync.yml" ]; then
                 echo "Keeping fork workflow: $conflict_path"
                 git checkout --ours -- "$conflict_path"
+                git add -- "$conflict_path"
               elif git cat-file -e "${upstream_sha}:${conflict_path}" 2>/dev/null; then
                 echo "Taking upstream version: $conflict_path"
                 git checkout "$upstream_sha" -- "$conflict_path"
@@ -76,7 +82,7 @@ jobs:
                 echo "Following upstream deletion: $conflict_path"
                 git rm -- "$conflict_path"
               fi
-            done < <(git diff --name-only -z --diff-filter=U)
+            done < "$paths_file"
 
             if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
               echo "::error::Unresolved merge conflicts remain after applying the upstream-wins policy."
@@ -89,6 +95,7 @@ jobs:
           fi
 
           echo "Preserving fork-owned GitHub workflows."
+          git diff --name-only -z "$before_sha" HEAD -- .github/workflows > "$paths_file"
           while IFS= read -r -d '' workflow_path; do
             if git cat-file -e "${before_sha}:${workflow_path}" 2>/dev/null; then
               echo "Keeping fork workflow: $workflow_path"
@@ -97,7 +104,7 @@ jobs:
               echo "Dropping upstream-added workflow: $workflow_path"
               git rm -- "$workflow_path"
             fi
-          done < <(git diff --name-only -z "$before_sha" HEAD -- .github/workflows)
+          done < "$paths_file"
 
           git add -A .github/workflows
           if ! git diff --cached --quiet; then
