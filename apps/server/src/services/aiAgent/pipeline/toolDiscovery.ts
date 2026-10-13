@@ -20,6 +20,7 @@ import type {
 import type { LobeChatDatabase } from '@lobechat/database';
 import type { DeviceUnavailableErrorData } from '@lobechat/device-gateway-client';
 import {
+  dropInvalidManifests,
   readFrozenModelFacts,
   resolveClientExecutors,
   resolveDiscoveryPool,
@@ -69,11 +70,7 @@ import type { ServerAgentToolsContext } from '@/server/modules/Mecha';
 import { createServerAgentToolsEngine } from '@/server/modules/Mecha';
 import { createServerModelParamsProviders } from '@/server/modules/Mecha/ModelParams/providers';
 import type { AgentDocumentsService } from '@/server/services/agentDocuments';
-import {
-  isAgentSignalEnabledForUser,
-  isLobeAiAgentSlug,
-  resolveAgentSelfIterationCapability,
-} from '@/server/services/agentSignal/featureGate';
+import { isAgentSignalEnabledForUser } from '@/server/services/agentSignal/featureGate';
 import { resolveUnsupportedMessageApis } from '@/server/services/bot/platforms/messageCapabilities';
 import type { ComposioService } from '@/server/services/composio';
 import {
@@ -278,7 +275,6 @@ export const discoverTools = async (
   } = ctx;
   const {
     additionalPluginIds,
-    agentSlug,
     attachedFileIds,
     botContext,
     disableLocalSystem,
@@ -365,7 +361,7 @@ export const discoverTools = async (
   // OAuth credentials touched for a visitor turn (issuing background MCP
   // traffic and refresh jobs on behalf of the creator). The later pass right
   // before manifest discovery (~line 618) stays as defense in depth: internal
-  // additions like the topic-reference / bot message / multimodal
+  // additions like the bot message / multimodal
   // understanding tool are appended after this point and must run through the
   // same allowlist.
   if (shareGate) {
@@ -843,7 +839,6 @@ export const discoverTools = async (
     };
 
     // Dynamically inject turn-scoped builtin tools.
-    const hasTopicReference = /refer_topic/.test(prompt ?? '');
     const modelAbilities =
       builtinModels.find((item) => item.id === model && item.providerId === provider)?.abilities ??
       builtinModels.find((item) => item.id === model)?.abilities;
@@ -876,7 +871,6 @@ export const discoverTools = async (
       (needsAudioUnderstanding || needsImageUnderstanding || needsVideoUnderstanding);
     agentPlugins = [
       ...agentPlugins,
-      ...(hasTopicReference ? ['lobe-topic-reference'] : []),
       ...(isBotConversation ? [MessageToolIdentifier] : []),
       ...(shouldEnableMultimodalUnderstanding ? [LobeAgentManifest.identifier] : []),
     ];
@@ -894,8 +888,8 @@ export const discoverTools = async (
     // `discoverTools` (before connector resolution) so that ungranted
     // connectors never reach `resolveByIdentifiers` /
     // `scheduleStaleConnectorToolsRefresh`. Keep this second pass — the
-    // internal additions above (topic reference, bot message tool,
-    // multimodal understanding) are appended after the first pass and would
+    // internal additions above (bot message tool, multimodal understanding)
+    // are appended after the first pass and would
     // otherwise slip through.
     if (shareGate) {
       agentPlugins = filterPluginsByShareGate(agentPlugins, shareGate);
@@ -1195,6 +1189,19 @@ export const discoverTools = async (
       enabledManifests: manifestMap,
       exclusivePluginIds,
       executionTarget: executionPlan.target,
+      // Installed-but-not-pinned plugins (`auto` in the three-state plugin
+      // config): the model must be able to discover and activate them mid-run,
+      // exactly as the client runtime lists them from `installedPlugins`.
+      // They never join `enabledToolIds` — the engine's rules stay pinned-only
+      // — so this widens what the activator can reach, not what the run gets
+      // by default. Disabled ids were dropped in 5a and the pool's own ingest
+      // wall re-checks them; a connector / Composio / LobeHub skill manifest
+      // of the same identifier still wins, because the pool seeds this source
+      // last.
+      installedManifests: dropInvalidManifests(
+        pluginsWithoutConnectors.map((plugin) => plugin.manifest as LobeToolManifest | undefined),
+        'installedPlugins(auto)',
+      ),
       lobehubSkills: activeLobehubSkillManifests,
       manifestContext,
     });
@@ -1203,7 +1210,6 @@ export const discoverTools = async (
     Object.assign(
       toolExecutorMap,
       resolveClientExecutors({
-        enabledIds: new Set(manifestMap.keys()),
         hasDeviceProxy: gatewayConfigured,
         manifestMap: toolManifestMap,
         stdioIdentifiers: [
@@ -1224,8 +1230,6 @@ export const discoverTools = async (
       composioManifests.length,
     );
 
-    const agentSelfIterationEnabled = agentConfig.chatConfig?.selfIteration?.enabled === true;
-    const isLobeAiAgent = isLobeAiAgentSlug(agentSlug);
     // Share-visitor fail-closed gate — never expose the
     // `declareSelfFeedbackIntent` tool to a share-visitor turn. This tool sits
     // outside the normal `toolManifestMap` / `applyShareGateToToolSet`
@@ -1237,19 +1241,18 @@ export const discoverTools = async (
     // to the creator's memory. Same root cause as the `agent.user.message`
     // gate in `turnSetup`; `allowReadMemory` is a read-only grant so this must
     // not be conditional on it either.
-    const shouldCheckUserSelfIterationGate =
-      !shareGate && !disableSelfFeedbackIntentTool && (agentSelfIterationEnabled || isLobeAiAgent);
-    if (shouldCheckUserSelfIterationGate) {
-      const featureUserEnabled = await isAgentSignalEnabledForUser(deps.db, deps.userId);
-      const effectiveAgentSelfIterationEnabled = resolveAgentSelfIterationCapability({
-        agentSelfIterationEnabled,
-        isAgentSelfIterationFeatureEnabled: featureUserEnabled,
-        isLobeAiAgent,
+    //
+    // There is no per-agent switch: Labs → Self-evolving covers every agent.
+    if (!shareGate && !disableSelfFeedbackIntentTool) {
+      // The run already reads `users.preference` for expertise injection; reuse that row.
+      // A failed read leaves the tool off (fail closed).
+      const featureUserEnabled = await isAgentSignalEnabledForUser(deps.db, deps.userId, {
+        preference: await ctx.runFacts.userPreference().catch(() => undefined),
       });
 
       if (
         shouldExposeSelfFeedbackIntentTool({
-          agentSelfIterationEnabled: effectiveAgentSelfIterationEnabled,
+          agentSelfIterationEnabled: featureUserEnabled,
           disableSelfFeedbackIntentTool,
           featureUserEnabled,
         })
