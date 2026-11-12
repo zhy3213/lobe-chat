@@ -17,14 +17,8 @@
  *
  * Each factory also exposes `.root` (the namespace string) for `mutate`
  * matchers that compare `key[0]`.
- *
- * Document / page / agent-document keys are defined in
- * `@/services/document/swrKeys` (already a factory, widely imported) and
- * re-exported here so the whole set is reachable from one place.
  */
 import { type ConversationContext } from '@lobechat/types';
-
-import { agentDocumentSWRKeys } from '@/services/document/swrKeys';
 
 type KeyFactory<A extends unknown[]> = ((...args: A) => readonly unknown[]) & { root: string };
 
@@ -285,23 +279,6 @@ export const workKeys = {
   ),
 };
 
-// ---- brief --------------------------------------------------------------
-// The unresolved brief feed no longer has an SWR key: it moved onto
-// `local-replica` (`briefList`, partitioned by identity scope). Only the
-// day-scoped news digest still reads through SWR.
-export const briefKeys = {
-  /**
-   * Day-scoped news digest (`insight` + `result`, resolved included), keyed by
-   * the viewer's local day (`YYYY-MM-DD`) on top of the identity scope.
-   */
-  news: def('brief:news', (isLogin: boolean, scope: string, day: string) => [
-    'brief:news',
-    isLogin,
-    scope,
-    day,
-  ]),
-};
-
 // ---- agent config / available / search ----------------------------------
 export const agentConfigKeys = {
   search: def('agent:search', (keyword?: string) => ['agent:search', keyword]),
@@ -528,7 +505,7 @@ export const fileKeys = {
 // =========================================================================
 // UI-layer keys (features / routes / components). Prefixes below stay
 // memory-only unless explicitly listed in `CACHE_TIERS`. Names avoid colliding
-// with cached prefixes — e.g. share/topicInfo is `share:` not `topic:`, portal
+// with cached prefixes — e.g. share/topic is `share:` not `topic:`, portal
 // header is `portal:` not `document:`.
 // =========================================================================
 
@@ -555,39 +532,18 @@ export const apiKeyKeys = {
 
 // ---- messenger / platform integration -----------------------------------
 export const messengerKeys = {
-  agentsForBinding: def('messenger:agentsForBinding', (workspaceId: string | null | undefined) => [
-    'messenger:agentsForBinding',
-    workspaceId ?? null,
-  ]),
-  availablePlatforms: def('messenger:availablePlatforms', () => ['messenger:availablePlatforms']),
-  bindingScopes: def('messenger:bindingScopes', () => ['messenger:bindingScopes']),
-  listMyInstallations: def('messenger:listMyInstallations', () => [
-    'messenger:listMyInstallations',
-  ]),
-  listMyLinks: def('messenger:listMyLinks', () => ['messenger:listMyLinks']),
   myLink: def('messenger:myLink', (platform: string, tokenScopeKey: string | undefined) => [
     'messenger:myLink',
     platform,
     tokenScopeKey,
   ]),
   peek: def('messenger:peek', (randomId: string) => ['messenger:peek', randomId]),
-  pushWindow: def('messenger:pushWindow', (platform: string, tenantId?: string) => [
-    'messenger:pushWindow',
-    platform,
-    tenantId ?? null,
-  ]),
 };
 
 // ---- scm (GitHub App integration) --------------------------------------
 export const scmKeys = {
   changeRequests: def('scm:changeRequests', (workspaceId: string | null | undefined) => [
     'scm:changeRequests',
-    workspaceId ?? null,
-  ]),
-  config: def('scm:config', () => ['scm:config']),
-  identity: def('scm:identity', (provider: string) => ['scm:identity', provider]),
-  installations: def('scm:installations', (workspaceId: string | null | undefined) => [
-    'scm:installations',
     workspaceId ?? null,
   ]),
   repositories: def('scm:repositories', (workspaceId: string | null | undefined) => [
@@ -661,7 +617,6 @@ export const shareKeys = {
     documentId,
   ]),
   topic: def('share:topic', (id: string) => ['share:topic', id]),
-  topicInfo: def('share:topicInfo', (topicId: string) => ['share:topicInfo', topicId]),
   /** The visitor's own topics under an agent share (server-scoped by senderId). */
   visitorTopics: def('share:visitorTopics', (shareId: string) => ['share:visitorTopics', shareId]),
 };
@@ -764,16 +719,9 @@ export const onboardingKeys = {
   understandingTopic: def('onboarding:understandingTopic', () => ['onboarding:understandingTopic']),
 };
 
-// ---- agent home / profile / signal (kept off the `agent:` idb tier) -----
+// ---- agent home / profile (kept off the `agent:` idb tier) -----
 export const agentHomeKeys = {
   topics: def('agentHome:topics', (agentId: string) => ['agentHome:topics', agentId]),
-};
-export const agentSignalKeys = {
-  receipts: def('agentSignal:receipts', (agentId: string, topicId: string) => [
-    'agentSignal:receipts',
-    agentId,
-    topicId,
-  ]),
 };
 
 // ---- bot wake records (one bot's judged messages; never persisted) ----
@@ -882,11 +830,8 @@ export const taskLabelKeys = {
 
 export const swrKeys = {
   agent: agentConfigKeys,
-  agentDocument: agentDocumentSWRKeys,
   agentHome: agentHomeKeys,
-  agentSignal: agentSignalKeys,
   auth: authKeys,
-  brief: briefKeys,
   canvas: canvasKeys,
   changelog: changelogKeys,
   cron: cronKeys,

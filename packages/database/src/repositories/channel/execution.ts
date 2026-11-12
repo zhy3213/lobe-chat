@@ -24,6 +24,8 @@ import { resolveRouting } from './routing';
 import type { ChannelStopScope } from './stop';
 import { stopScope } from './stop';
 import { audit, withChannelLock } from './transaction';
+import type { ChannelWorktreeCandidate } from './worktree';
+import { assignWorktree, findWorktreeCandidate, markWorktreeUnavailable } from './worktree';
 import { advanceOperation, isolateWriter, isOpenJob, operationStatus } from './writer';
 
 /**
@@ -230,6 +232,24 @@ export class ChannelExecutionRepository {
   ): Promise<ChannelClaim | null> =>
     withChannelLock(this.db, channelId, (tx, channel) => claimJob(tx, channel, jobId, options));
 
+  /** A job waiting only on its directory whose branch could move into its own worktree. */
+  worktreeCandidate = async (channelId: string, jobId: string) =>
+    withChannelLock(this.db, channelId, (tx) => findWorktreeCandidate(tx, channelId, jobId));
+
+  /** Records the worktree the device created for the candidate's branch. */
+  assignWorktree = async (channelId: string, candidate: ChannelWorktreeCandidate, path: string) =>
+    withChannelLock(this.db, channelId, (tx) => assignWorktree(tx, channelId, candidate, path));
+
+  /** The device could not create the worktree; leave the directory alone for a while. */
+  worktreeUnavailable = async (
+    channelId: string,
+    candidate: ChannelWorktreeCandidate,
+    reason: string,
+  ) =>
+    withChannelLock(this.db, channelId, (tx) =>
+      markWorktreeUnavailable(tx, channelId, candidate, reason),
+    );
+
   /**
    * The triggering request and its explicit quote; see `recentContext` for the rest. Reads
    * without the channel lock, since nothing at or before the cutoff changes after the claim.
@@ -256,6 +276,39 @@ export class ChannelExecutionRepository {
       messageId: replyToId,
     });
     return [...quoted, ...request];
+  };
+
+  /**
+   * The reply a deferred follow-up waited for: the primary responder's answer to the same
+   * request, published after the request cutoff. Read by id within the job's branch only; the
+   * cutoff still bounds the history tools. Null for every other job.
+   */
+  primaryReply = async (
+    channelId: string,
+    jobId: string,
+  ): Promise<ChannelContextMessage | null> => {
+    const [job] = await this.db
+      .select({ manifest: channelJobs.manifest })
+      .from(channelJobs)
+      .where(
+        and(
+          eq(channelJobs.channelId, channelId),
+          eq(channelJobs.id, jobId),
+          isNotNull(channelJobs.manifest),
+        ),
+      );
+    if (!job?.manifest) throw new ChannelError('NOT_FOUND', 'Claimed job not found');
+    const messageId = job.manifest.primaryReplyMessageId;
+    if (!messageId) return null;
+
+    const [reply] = await readManifestMessages(
+      this.db,
+      channelId,
+      // Sequences are int4; the reply is past the request cutoff, so lift it for this one id.
+      { ...job.manifest, cutoffSequence: 2_147_483_647 },
+      { messageId },
+    );
+    return reply ?? null;
   };
 
   /**
