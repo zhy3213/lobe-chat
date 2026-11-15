@@ -154,7 +154,7 @@ export type TaskViewMode = 'kanban' | 'list';
 /** How topics inside one byProject sidebar group are sectioned. */
 export type ProjectTopicSubGroupMode = 'none' | 'byDevice' | 'byTime' | 'byStatus';
 
-export const DEFAULT_HOME_SIDEBAR_EXPANDED_KEYS = ['favorites', 'recents', 'agent', 'private'];
+export const DEFAULT_HOME_SIDEBAR_EXPANDED_KEYS = ['favorites', 'recents', 'agent'];
 
 /** How the agent document tree orders sibling rows. */
 export interface AgentDocumentSort {
@@ -228,7 +228,8 @@ export interface SystemStatus {
    * Display options of the agent view-all page (grouping / ordering / hidden-agent visibility)
    */
   agentListViewOptions?: {
-    groupBy: 'author' | 'label' | 'none';
+    /** Unset until the member picks one; the page then defaults per mode. */
+    groupBy?: 'author' | 'folder' | 'label' | 'none';
     orderBy: 'author' | 'title' | 'updatedAt';
     orderDirection: 'asc' | 'desc';
     showSidebarHidden: boolean;
@@ -345,6 +346,8 @@ export interface SystemStatus {
    * Remember user's last selected image generation provider
    */
   lastSelectedImageProvider?: string;
+  lastSelectedMusicModel?: string;
+  lastSelectedMusicProvider?: string;
   lastSelectedVideoModel?: string;
   lastSelectedVideoProvider?: string;
   latestChangelogId?: string;
@@ -374,6 +377,7 @@ export interface SystemStatus {
    * ModelSwitchPanel width
    */
   modelSwitchPanelWidth?: number;
+  musicTopicViewMode?: 'grid' | 'list';
   noWideScreen?: boolean;
   pageAgentPanelWidth?: number;
   /**
@@ -651,7 +655,6 @@ export const INITIAL_STATUS = {
   agentListSidebarSectionCollapsed: false,
   agentListViewMode: 'card' as const,
   agentListViewOptions: {
-    groupBy: 'none' as const,
     orderBy: 'updatedAt' as const,
     orderDirection: 'desc' as const,
     showSidebarHidden: true,
@@ -729,6 +732,8 @@ export const INITIAL_STATUS = {
   terminalPanelHeight: 320,
   tokenDisplayFormatShort: true,
   topicPageSize: 20,
+  // Songs rarely carry cover art, so music topics read better as a titled list
+  musicTopicViewMode: 'list' as const,
   verifyReportPanelWidth: 300,
   videoPanelWidth: 320,
   videoTopicViewMode: 'grid' as const,
