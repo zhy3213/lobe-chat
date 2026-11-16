@@ -39,31 +39,6 @@ export const isChannelRuntime = (runtime: string): runtime is ChannelRuntime =>
   !Object.hasOwn(CHANNEL_EXCLUDED_RUNTIMES, runtime) &&
   (CHANNEL_RUNTIMES as readonly string[]).includes(runtime);
 
-/**
- * The device a Channel seats an Agent on until someone picks another: the one the Agent is bound
- * to, else this person's own desktop for an Agent that runs on its user's machine (`local`, or an
- * external runtime with no target). Never another available or online device.
- */
-export const defaultChannelAgentDevice = ({
-  agencyConfig,
-  localDeviceId,
-  runtime,
-  workspaceScoped,
-}: {
-  agencyConfig?: Pick<LobeAgentAgencyConfig, 'boundDeviceId' | 'executionTarget'> | null;
-  /** This person's own desktop, when they act from one. */
-  localDeviceId?: string;
-  runtime: string;
-  /** The Agent runs on workspace devices only, never a personal desktop. */
-  workspaceScoped?: boolean;
-}): string | undefined => {
-  const target = agencyConfig?.executionTarget;
-  if (target === 'none' || target === 'sandbox' || target === 'auto') return;
-  const localDefault =
-    !workspaceScoped && (target === 'local' || (target === undefined && runtime !== 'native'));
-  return agencyConfig?.boundDeviceId || (localDefault ? localDeviceId : undefined);
-};
-
 /** The directory on that device: the Agent's own choice there, else the device's default. */
 export const defaultChannelAgentDirectory = (
   agencyConfig: Pick<LobeAgentAgencyConfig, 'workingDirByDevice'> | null | undefined,
@@ -246,9 +221,23 @@ export const channelMessageVia = (
 };
 
 /** Effective Agent settings and Channel environment, frozen once when a job is claimed. */
+/**
+ * Another person's Agent reached through the requester's contact entry and its link share. The
+ * run executes as the Agent's owner under the share's limits; the topic is the owner's, tagged
+ * with the requester as its sender.
+ */
+export interface ChannelSharedAgentAccess {
+  ownerId: string;
+  shareId: string;
+  /** The Agent's scope, which the run and its topic use; not the Channel's. */
+  workspaceId: string | null;
+}
+
 export interface ChannelExecutionConfig extends LobeAgentConfig, ChannelMemberConfig {
   provider: string;
   runtime: ChannelRuntime;
+  /** Set when the Agent belongs to someone else and is used through its share. */
+  share?: ChannelSharedAgentAccess;
   /** Set when the run works in its branch's worktree; `workingDirectory` is then that worktree. */
   worktreeBranch?: string;
 }
@@ -477,6 +466,11 @@ export interface ChannelListItem {
   memberAvatars?: ChannelAvatarMember[];
   /** Unread messages, Threads included, that @mention the caller; set by the Channel list. */
   mentionCount?: number;
+  /**
+   * On a conversation between two people, the other person (relative to the viewer), who is also
+   * the only entry of `memberAvatars`; null otherwise.
+   */
+  peerUserId?: string | null;
   /** The project the channel is grouped under; null for a standalone channel. */
   projectId: string | null;
   /**
@@ -485,6 +479,11 @@ export interface ChannelListItem {
    */
   replyJobs?: ChannelReplyJob[];
   sequence: number;
+  /**
+   * A direct conversation with another person's Agent, reached through the caller's contact entry
+   * and its share; pictured by `memberAvatars`, since the caller has no sidebar row for it.
+   */
+  sharedAgent?: boolean;
   status: ChannelStatus;
   title: string;
   /** Main-channel messages the caller has not read; set by the Channel list. */
@@ -552,8 +551,15 @@ export interface ChannelPublicJob {
   blockedCode: ChannelJobBlockCode | null;
   /** Server-computed for the current member: its requester or an admin. */
   canStop: boolean;
+  /**
+   * The device the reply runs on, waits for or failed to reach, when known: the claimed
+   * device, a failed dispatch's route, or the Agent's own bound device.
+   */
+  deviceId?: string | null;
   /** Failure diagnostic only. */
   errorMessage: string | null;
+  /** Category of a failure (a `ChatErrorType`), for a localized explanation. */
+  errorType?: string | null;
   id: string;
   memberId: string;
   messageId: string;
