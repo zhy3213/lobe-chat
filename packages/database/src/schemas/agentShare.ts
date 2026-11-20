@@ -4,7 +4,7 @@ import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle
 import { timestamps } from './_helpers';
 import { agents } from './agent';
 
-export type AgentShareDeviceAccess = 'allowlist' | 'none';
+export type AgentShareDeviceAccess = 'allowlist' | 'contacts' | 'none';
 
 export interface AgentShareConfig {
   /**
@@ -29,6 +29,9 @@ export interface AgentShareConfig {
    * - `allowlist`: only the people in {@link deviceAllowUserIds} who are
    *   still in the Agent's address book. They get the device tools and, for a
    *   heterogeneous Agent, run it on the device.
+   * - `contacts`: everyone currently in the Agent's address book, so a creator
+   *   can prepare the share before someone joins: they can use it as soon as
+   *   they are added, and lose it when removed.
    *
    * There is no "every visitor" value: a stranger never reaches the creator's
    * machine. The visitor never picks the device — it always follows the
@@ -54,10 +57,11 @@ export interface AgentShareConfig {
    * visitor attachments off entirely. Enforced by `shareChat.createUploadUrl`.
    */
   maxFileStorage?: number;
-  /** Maximum number of topics each signed-in visitor can create for this share. */
-  maxTopicsPerVisitor?: number;
-  /** Maximum number of message turns allowed in each shared topic. */
-  maxTurnsPerTopic?: number;
+  /**
+   * Messages each signed-in visitor may send to this share in total, across every conversation.
+   * Only the visitor's own messages count; the Agent's replies do not.
+   */
+  maxMessagesPerVisitor?: number;
   /**
    * Per-Agent monthly spend cap for this share, in USD credits.
    *
@@ -71,16 +75,6 @@ export interface AgentShareConfig {
    * the OSS schema only carries the configured value.
    */
   monthlySpendLimit?: number;
-  /**
-   * Whether visitors may see raw run error details (message/stack) instead of
-   * a generic failure notice. Defaults to `false`.
-   */
-  showErrorDetails?: boolean;
-  /**
-   * Whether visitors may see which model/provider is powering the agent.
-   * Defaults to `false` — the creator's model choice is hidden by default.
-   */
-  showModelInfo?: boolean;
   /**
    * Skills visitors may load, by skill identifier. Deliberately separate from
    * {@link toolGrants}: a skill grant governs BOTH the tool path
@@ -113,12 +107,13 @@ export interface AgentShareConfig {
 }
 
 /**
- * `AgentShareConfig` as returned by `normalizeAgentShareConfig`: the spend cap
- * is guaranteed present, so enforcement paths never have to re-derive a
+ * `AgentShareConfig` as returned by `normalizeAgentShareConfig`: the caps are
+ * guaranteed present, so enforcement paths never have to re-derive a
  * default (and can never mistake a missing cap for "unlimited").
  */
 export type NormalizedAgentShareConfig = AgentShareConfig & {
   maxFileStorage: number;
+  maxMessagesPerVisitor: number;
   monthlySpendLimit: number;
 };
 
