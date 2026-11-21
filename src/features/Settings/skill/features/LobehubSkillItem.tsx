@@ -13,7 +13,7 @@ import {
   Tooltip,
 } from '@lobehub/ui';
 import * as stylex from '@stylexjs/stylex';
-import { MoreHorizontalIcon, SquareArrowOutUpRight, Unplug } from 'lucide-react';
+import { MoreHorizontalIcon, RotateCcw, SquareArrowOutUpRight, Unplug } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -35,6 +35,7 @@ const POLL_INTERVAL_MS = 1000;
 const POLL_TIMEOUT_MS = 15_000;
 
 interface LobehubSkillItemProps {
+  hideConnectedStatus?: boolean;
   isSelected?: boolean;
   onDelete?: () => void;
   onSelect?: () => void;
@@ -43,7 +44,7 @@ interface LobehubSkillItemProps {
 }
 
 const LobehubSkillItem = memo<LobehubSkillItemProps>(
-  ({ provider, server, isSelected, onSelect, onDelete }) => {
+  ({ hideConnectedStatus, provider, server, isSelected, onSelect, onDelete }) => {
     const { t } = useTranslation('setting');
     const isPage = useSkillListVariant() === 'page';
     const { allowed: canCreate, reason: createReason } = usePermission('create_content');
@@ -320,9 +321,8 @@ const LobehubSkillItem = memo<LobehubSkillItemProps>(
     // ChatInput skills dropdown UX: connected → green check; otherwise a Connect
     // button that opens the OAuth flow inline, so users can tell what is connected
     // and aren't left staring at a blank detail panel wondering if it's a bug.
-    // Page row: a quiet `+` connects in place; once connected the row's state
-    // reads from its position (Installed) and the action becomes the manage menu.
     const renderPageExtra = () => {
+      const needsAuth = server?.status === LobehubSkillStatus.ERROR;
       if (isConnected)
         return (
           <RowMoreMenu
@@ -343,7 +343,8 @@ const LobehubSkillItem = memo<LobehubSkillItemProps>(
         <RowAddAction
           disabled={!canCreate || !canEdit}
           disabledReason={!canCreate ? createReason : editReason}
-          label={t('connectorMarket.action.connect')}
+          icon={needsAuth ? RotateCcw : undefined}
+          label={t(needsAuth ? 'tools.composio.reauthorize' : 'connectorMarket.action.connect')}
           loading={isConnecting || isWaitingAuth}
           onClick={handleConnect}
         />
@@ -356,6 +357,7 @@ const LobehubSkillItem = memo<LobehubSkillItemProps>(
         return <Button disabled loading size="small" type="text" />;
       }
       if (isConnected) {
+        if (hideConnectedStatus) return null;
         return (
           <ConnectedStatus
             label={t('tools.lobehubSkill.connected', { defaultValue: 'Connected' })}
@@ -366,9 +368,9 @@ const LobehubSkillItem = memo<LobehubSkillItemProps>(
         <Tooltip title={!canCreate ? createReason : editReason}>
           <Button
             disabled={!canCreate || !canEdit}
-            icon={isPage ? undefined : <Icon icon={SquareArrowOutUpRight} />}
+            icon={<Icon icon={SquareArrowOutUpRight} />}
             size="small"
-            type={isPage ? 'default' : 'text'}
+            type={'text'}
             onClick={handleConnect}
           >
             {t('tools.lobehubSkill.connect')}
