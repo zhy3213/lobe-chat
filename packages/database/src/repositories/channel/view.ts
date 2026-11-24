@@ -1,6 +1,7 @@
 import {
   type AgentDeviceOverride,
   type ChannelDeviceGrantCard,
+  channelMessageConnector,
   channelMessageDeletedAt,
   channelMessageDeviceGrant,
   channelMessageEditedAt,
@@ -52,6 +53,7 @@ import { channelAttachments, fileIdsByMessage } from './attachments';
 import { isAgentAuthored } from './author';
 import { activeMembers } from './delivery';
 import { ChannelError } from './error';
+import { channelUserNameSql } from './nickname';
 import { isOpeningAck } from './openingAck';
 import { replyWorksByMessage } from './works';
 
@@ -61,7 +63,7 @@ export const publicMessageColumns = {
   senderAgentName: agents.name,
   senderAgentTitle: agentTitleSql(),
   senderUserAvatar: users.avatar,
-  senderUserName: users.fullName,
+  senderUserName: channelUserNameSql(channelMessages.channelId, channelMessages.userId),
   senderUsername: users.username,
 };
 
@@ -140,6 +142,8 @@ export const publicMessage = (
       type: isAgent ? ('agent' as const) : ('user' as const),
     },
     card: contactCardOf(message.metadata) ?? null,
+    // An Agent asking the reader to connect a connector it needs.
+    connector: (isAgent && channelMessageConnector(message.metadata)) || null,
     deletedAt: channelMessageDeletedAt(message.metadata),
     editedAt: channelMessageEditedAt(message.metadata),
     // On an Agent's message, the exchange between Agents it reports from.
@@ -619,7 +623,7 @@ export const readChannelView = async (
         role: channelMembers.role,
         status: channelMembers.status,
         userId: channelMembers.userId,
-        userName: users.fullName,
+        userName: channelUserNameSql(channelMembers.channelId, channelMembers.userId),
         username: users.username,
         userAvatar: users.avatar,
         lastReadSequence: channelMembers.lastReadSequence,
